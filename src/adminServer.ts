@@ -112,6 +112,47 @@ export function startAdminServer(toolManager: ToolManager, port: number = 8080) 
         }
     });
 
+    // --- Human in the Loop (HITL) API ---
+    app.post('/api/tools/:name/approval', (req, res) => {
+        const name = req.params.name;
+        const { requiresApproval, profileId = 'default' } = req.body;
+
+        if (typeof requiresApproval !== 'boolean') {
+            return res.status(400).json({ error: "Invalid payload. 'requiresApproval' must be a boolean." });
+        }
+
+        const success = toolManager.setToolApproval(profileId, name, requiresApproval);
+
+        if (success) {
+            res.json({ success: true, name, requiresApproval });
+        } else {
+            res.status(404).json({ error: `Tool ${name} not found or invalid profile.` });
+        }
+    });
+
+    app.get('/api/hitl/pending', (req, res) => {
+        res.json(toolManager.getPendingApprovals());
+    });
+
+    app.post('/api/hitl/:id/approve', (req, res) => {
+        const success = toolManager.approveRequest(req.params.id);
+        if (success) {
+            res.json({ success: true });
+        } else {
+            res.status(404).json({ error: 'Pending request not found.' });
+        }
+    });
+
+    app.post('/api/hitl/:id/reject', (req, res) => {
+        const reason = req.body?.reason;
+        const success = toolManager.rejectRequest(req.params.id, reason);
+        if (success) {
+            res.json({ success: true });
+        } else {
+            res.status(404).json({ error: 'Pending request not found.' });
+        }
+    });
+
     // --- Audit & Analytics API ---
     app.get('/api/audit/logs', async (req, res) => {
         try {

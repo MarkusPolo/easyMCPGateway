@@ -1,11 +1,13 @@
 let cachedTools = [];
 let cachedProfiles = [];
 let activeProfileId = 'default';
+let hitlPollInterval = null;
 
 document.addEventListener('DOMContentLoaded', async () => {
     await fetchProfiles();
     fetchTools();
     setupTabs();
+    startHitlPolling();
 });
 
 async function fetchProfiles() {
@@ -197,9 +199,20 @@ function showLogModal(log) {
 
 // Close modal on outside click
 document.addEventListener('click', (e) => {
+    // Close log detail modal
     const modal = document.getElementById('log-detail-modal');
     if (e.target === modal) {
         closeLogModal();
+    }
+
+    // Close HITL panel if clicking outside it
+    const hitlPanel = document.getElementById('hitl-panel');
+    const hitlBellBtn = document.getElementById('hitl-bell-btn');
+    if (hitlPanel && hitlPanel.style.display === 'flex') {
+        // If the click is not inside the panel, and the click is not on the bell button (which toggles it)
+        if (!hitlPanel.contains(e.target) && !hitlBellBtn.contains(e.target)) {
+            hitlPanel.style.display = 'none';
+        }
     }
 });
 
@@ -491,6 +504,13 @@ function renderTools(tools, grid, stats) {
                 <span class="status-badge" id="badge-${tool.name}">${tool.isEnabled ? 'Active' : 'Disabled'}</span>
                 <button class="tool-test-btn" onclick="toggleTestPanel('${tool.name}')">Test Tool</button>
             </div>
+            <div class="tool-approval-row">
+                <span class="tool-approval-label"><span class="shield-icon">🛡️</span> Require Approval</span>
+                <label class="switch" style="width:36px; height:20px;">
+                    <input type="checkbox" onchange="toggleApproval('${tool.name}', this.checked)" ${tool.requiresApproval ? 'checked' : ''}>
+                    <span class="slider" style="border-radius:20px;"></span>
+                </label>
+            </div>
             
             <div class="test-panel" id="test-panel-${tool.name}">
                 <form id="form-${tool.name}" onsubmit="executeTool(event, '${tool.name}')">
@@ -641,4 +661,131 @@ function escapeHtml(unsafe) {
         .replace(/>/g, "&gt;")
         .replace(/"/g, "&quot;")
         .replace(/'/g, "&#039;");
+}
+
+// --- Human in the Loop (HITL) ---
+
+async function toggleApproval(name, requiresApproval) {
+    try {
+        const response = await fetch(`/api/tools/${name}/approval`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ requiresApproval, profileId: activeProfileId })
+        });
+        if (!response.ok) throw new Error('Failed to toggle approval');
+        fetchTools();
+    } catch (error) {
+        console.error(`Failed to toggle approval for ${name}:`, error);
+        alert(`Error toggling approval for ${name}. Please try again.`);
+        fetchTools();
+    }
+}
+
+function toggleHitlPanel() {
+    const panel = document.getElementById('hitl-panel');
+    if (panel.style.display === 'none' || !panel.style.display) {
+        panel.style.display = 'flex';
+        fetchPendingApprovals();
+    } else {
+        panel.style.display = 'none';
+    }
+}
+
+async function fetchPendingApprovals() {
+    try {
+        const res = await fetch('/api/hitl/pending');
+        const pending = await res.json();
+        renderPendingApprovals(pending);
+        updateHitlBadge(pending.length);
+    } catch (e) {
+        console.error('Failed to fetch pending approvals', e);
+    }
+}
+
+function updateHitlBadge(count) {
+    const badge = document.getElementById('hitl-badge');
+    const bell = document.getElementById('hitl-bell-btn');
+    if (count > 0) {
+        badge.textContent = count;
+        badge.style.display = 'flex';
+        bell.classList.add('has-pending');
+    } else {
+        badge.style.display = 'none';
+        bell.classList.remove('has-pending');
+    }
+}
+
+function renderPendingApprovals(pending) {
+    const body = document.getElementById('hitl-panel-body');
+    if (!pending || pending.length === 0) {
+        body.innerHTML = '<div style="text-align:center; padding: 24px; color: var(--text-secondary);">No pending approvals.</div>';
+        return;
+    }
+
+    let html = '';
+    pending.forEach(req => {
+        const time = new Date(req.createdAt).toLocaleString();
+        let argsDisplay;
+        try {
+            argsDisplay = JSON.stringify(req.args, null, 2);
+        } catch (e) {
+            argsDisplay = String(req.args);
+        }
+
+        html += `
+            <div class="hitl-request-card">
+                <div class="hitl-request-header">
+                    <span class="hitl-request-tool">${escapeHtml(req.toolName)}</span>
+                    <span class="hitl-request-profile">${escapeHtml(req.profileName)}</span>
+                </div>
+                <div class="hitl-request-args">${escapeHtml(argsDisplay)}</div>
+                <div class="hitl-request-time">Requested: ${time}</div>
+                <div class="hitl-request-actions">
+                    <button class="hitl-approve-btn" onclick="approveRequest('${req.id}')">✓ Approve</button>
+                    <button class="hitl-reject-btn" onclick="rejectRequest('${req.id}')">✕ Reject</button>
+                </div>
+            </div>
+        `;
+    });
+    body.innerHTML = html;
+}
+
+async function approveRequest(id) {
+    try {
+        const res = await fetch(`/api/hitl/${id}/approve`, { method: 'POST' });
+        if (!res.ok) throw new Error('Failed to approve');
+        fetchPendingApprovals();
+    } catch (e) {
+        alert('Error approving request: ' + e.message);
+    }
+}
+
+async function rejectRequest(id) {
+    try {
+        const res = await fetch(`/api/hitl/${id}/reject`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ reason: 'Rejected by administrator' })
+        });
+        if (!res.ok) throw new Error('Failed to reject');
+        fetchPendingApprovals();
+    } catch (e) {
+        alert('Error rejecting request: ' + e.message);
+    }
+}
+
+function startHitlPolling() {
+    if (hitlPollInterval) clearInterval(hitlPollInterval);
+    hitlPollInterval = setInterval(async () => {
+        try {
+            const res = await fetch('/api/hitl/pending');
+            const pending = await res.json();
+            updateHitlBadge(pending.length);
+            // If panel is visible, refresh its content too
+            const panel = document.getElementById('hitl-panel');
+            if (panel.style.display === 'flex') {
+                renderPendingApprovals(pending);
+            }
+        } catch (e) { /* silent */ }
+    }, 3000);
 }

@@ -27,11 +27,26 @@ export interface Profile {
     name: string;
     token: string;
     enabledTools: Record<string, boolean>;
+    requiresApproval: Record<string, boolean>;
 }
+
+export interface PendingApproval {
+    id: string;
+    toolName: string;
+    args: Record<string, any>;
+    profileId: string;
+    profileName: string;
+    createdAt: string;
+    resolve: (decision: 'approved') => void;
+    reject: (reason: string) => void;
+}
+
+const HITL_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 
 export class ToolManager {
     private tools: Map<string, ITool> = new Map();
     private profiles: Profile[] = [];
+    private pendingApprovals: Map<string, PendingApproval> = new Map();
     private configPath: string;
     private logger: AuditLogger;
 
@@ -60,7 +75,8 @@ export class ToolManager {
                 id: 'default',
                 name: 'Local Admin',
                 token: 'mcp-default-' + crypto.randomBytes(8).toString('hex'),
-                enabledTools: {}
+                enabledTools: {},
+                requiresApproval: {}
             }
         ];
         this.saveConfig();
@@ -98,9 +114,17 @@ export class ToolManager {
         // Ensure all registered tools have a state in all profiles
         let configChanged = false;
         for (const profile of this.profiles) {
+            if (!profile.requiresApproval) {
+                profile.requiresApproval = {};
+                configChanged = true;
+            }
             for (const name of this.tools.keys()) {
                 if (profile.enabledTools[name] === undefined) {
                     profile.enabledTools[name] = true; // default to enabled
+                    configChanged = true;
+                }
+                if (profile.requiresApproval[name] === undefined) {
+                    profile.requiresApproval[name] = false; // default to no approval
                     configChanged = true;
                 }
             }
@@ -136,10 +160,12 @@ export class ToolManager {
             id: crypto.randomUUID(),
             name,
             token: 'mcp-' + crypto.randomBytes(16).toString('hex'),
-            enabledTools: {}
+            enabledTools: {},
+            requiresApproval: {}
         };
         for (const toolName of this.tools.keys()) {
             newProfile.enabledTools[toolName] = true; // Enabled by default
+            newProfile.requiresApproval[toolName] = false; // No approval by default
         }
         this.profiles.push(newProfile);
         this.saveConfig();
@@ -179,7 +205,8 @@ export class ToolManager {
                 description: def.description,
                 category: def.category,
                 inputSchema: def.inputSchema,
-                isEnabled: profile.enabledTools[def.name] ?? true
+                isEnabled: profile.enabledTools[def.name] ?? true,
+                requiresApproval: profile.requiresApproval?.[def.name] ?? false
             };
         });
     }
@@ -212,6 +239,72 @@ export class ToolManager {
             return true;
         }
         return false;
+    }
+
+    // HITL: Set approval requirement for a tool on a profile
+    public setToolApproval(profileId: string, name: string, requiresApproval: boolean) {
+        const profile = this.getProfileById(profileId);
+        if (profile && this.tools.has(name)) {
+            if (!profile.requiresApproval) profile.requiresApproval = {};
+            profile.requiresApproval[name] = requiresApproval;
+            this.saveConfig();
+            return true;
+        }
+        return false;
+    }
+
+    // HITL: Pending approvals queue
+    public getPendingApprovals() {
+        return Array.from(this.pendingApprovals.values()).map(p => ({
+            id: p.id,
+            toolName: p.toolName,
+            args: p.args,
+            profileId: p.profileId,
+            profileName: p.profileName,
+            createdAt: p.createdAt
+        }));
+    }
+
+    public approveRequest(id: string): boolean {
+        const pending = this.pendingApprovals.get(id);
+        if (!pending) return false;
+        pending.resolve('approved');
+        this.pendingApprovals.delete(id);
+        return true;
+    }
+
+    public rejectRequest(id: string, reason?: string): boolean {
+        const pending = this.pendingApprovals.get(id);
+        if (!pending) return false;
+        pending.reject(reason || 'Rejected by administrator');
+        this.pendingApprovals.delete(id);
+        return true;
+    }
+
+    private waitForApproval(toolName: string, args: Record<string, any>, profileId: string, profileName: string): Promise<void> {
+        const id = crypto.randomUUID();
+        return new Promise<void>((resolve, reject) => {
+            const pending: PendingApproval = {
+                id,
+                toolName,
+                args,
+                profileId,
+                profileName,
+                createdAt: new Date().toISOString(),
+                resolve: () => resolve(),
+                reject: (reason: string) => reject(new Error(reason))
+            };
+            this.pendingApprovals.set(id, pending);
+            console.error(`[HITL] Approval required for tool "${toolName}" (request ${id})`);
+
+            // Auto-reject after timeout
+            setTimeout(() => {
+                if (this.pendingApprovals.has(id)) {
+                    this.pendingApprovals.delete(id);
+                    reject(new Error(`Approval timed out after ${HITL_TIMEOUT_MS / 1000}s for tool "${toolName}"`));
+                }
+            }, HITL_TIMEOUT_MS);
+        });
     }
 
     private async _executeWithLogging(tool: ITool, name: string, args: Record<string, any>, profileName: string): Promise<ToolResponse> {
@@ -300,6 +393,19 @@ export class ToolManager {
             }
 
             const args = request.params.arguments || {};
+
+            // HITL: Block execution if approval is required
+            if (profile?.requiresApproval?.[name]) {
+                try {
+                    await this.waitForApproval(name, args, profileId, profile?.name || 'Unknown');
+                } catch (err: any) {
+                    return {
+                        content: [{ type: "text" as const, text: `[HITL] ${err.message}` }],
+                        isError: true,
+                    };
+                }
+            }
+
             const result = await this._executeWithLogging(tool, name, args, profile?.name || 'Unknown');
 
             return {
