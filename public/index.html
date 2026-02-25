@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MCP Server Admin</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+    <div class="app-container">
+        <header>
+            <div class="header-content">
+                <div class="logo">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path
+                            d="M21 12C21 16.9706 16.9706 21 12 21C7.02944 21 3 16.9706 3 12C3 7.02944 7.02944 3 12 3C16.9706 3 21 7.02944 21 12Z"
+                            stroke="currentColor" stroke-width="2" />
+                        <path d="M12 8V16M16 12H8" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+                    </svg>
+                    <h1>MCP Server Status</h1>
+                </div>
+                <div class="server-status">
+                    <span class="status-dot online"></span>
+                    <span class="status-text">Server Active</span>
+                </div>
+            </div>
+
+            <p class="subtitle">Manage, test, and monitor your Model Context Protocol tools.</p>
+
+            <div class="profile-control-panel">
+                <div class="profile-row">
+                    <label for="profile-selector">Active Profile:</label>
+                    <select id="profile-selector" class="profile-input"></select>
+                    <button id="create-profile-btn" class="execute-btn"
+                        style="width: auto; padding: 8px 16px; margin-top: 0; font-size: 13px;"
+                        onclick="createProfile()">+ New Profile</button>
+                </div>
+                <div class="profile-row token-row">
+                    <label>Bearer Token:</label>
+                    <code id="active-profile-token" class="token-display">Loading...</code>
+                    <div class="token-actions">
+                        <button id="copy-token-btn" class="secondary-btn" onclick="copyToken()">Copy Token</button>
+                        <button id="regenerate-token-btn" class="secondary-btn"
+                            onclick="regenerateToken()">Regenerate</button>
+                        <button id="delete-profile-btn" class="danger-btn" style="display: none;"
+                            onclick="deleteProfile()">Delete</button>
+                    </div>
+                </div>
+            </div>
+
+            <nav class="tabs-nav">
+                <button class="tab-btn active" data-tab="tools">Tools</button>
+                <button class="tab-btn" data-tab="connections">Connections</button>
+                <button class="tab-btn" data-tab="logs">Audit Logs</button>
+                <button class="tab-btn" data-tab="analytics">Analytics</button>
+            </nav>
+        </header>
+
+        <main>
+            <div id="tools-view" class="tab-pane active">
+                <!-- TOOLS VIEW -->
+                <section id="view-tools" class="view-section active">
+                    <div class="tools-grid-header">
+                        <h2 id="tools-main-title">Available Packages</h2>
+                        <button id="back-to-categories-btn" class="execute-btn"
+                            style="display: none; width: auto; margin-left: 16px;" onclick="showCategories()">Back to
+                            Packages</button>
+                        <button id="toggle-all-category-btn" class="execute-btn"
+                            style="display: none; width: auto; margin-left: 8px; margin-right: auto;"></button>
+                        <span class="tools-stats" id="tools-stats">Loading...</span>
+                    </div>
+
+                    <div class="categories-grid" id="categories-grid">
+                        <div class="loading">Fetching packages from server...</div>
+                    </div>
+
+                    <div class="tools-grid" id="tools-grid" style="display: none;">
+                        <!-- Tool cards will be generated here -->
+                    </div>
+                </section>
+
+                <!-- Connections Tab -->
+                <div id="connections-view" class="tab-pane">
+                    <div class="tools-grid-header" style="margin-bottom: 24px;">
+                        <div>
+                            <h2 style="font-size: 18px; font-weight: 500;">Active Agent Connections</h2>
+                            <p style="color: var(--text-secondary); font-size: 14px; margin-top: 4px;">Currently open
+                                network sessions running an active Server-Sent Events (SSE) stream.</p>
+                        </div>
+                        <button class="execute-btn" style="width: auto" onclick="fetchConnections()">Refresh</button>
+                    </div>
+                    <div class="table-container">
+                        <table class="audit-table connections-table">
+                            <thead>
+                                <tr>
+                                    <th>Session ID</th>
+                                    <th>Agent Profile</th>
+                                    <th>Connected At</th>
+                                    <th>Status</th>
+                                </tr>
+                            </thead>
+                            <tbody id="connections-table-body">
+                                <tr>
+                                    <td colspan="4"
+                                        style="text-align:center; padding: 16px; color: var(--text-secondary);">Loading
+                                        connections...</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Audit Logs Tab -->
+                <!-- AUDIT LOGS VIEW -->
+                <section id="view-logs" class="view-section">
+                    <div class="tools-grid-header">
+                        <h2>Execution Audit Logs</h2>
+                        <button class="execute-btn" style="width: auto" onclick="loadAuditLogs()">Refresh</button>
+                    </div>
+                    <div class="table-container">
+                        <table class="audit-table">
+                            <thead>
+                                <tr>
+                                    <th>Timestamp</th>
+                                    <th>Tool</th>
+                                    <th>Parameters</th>
+                                    <th>Result Snippet</th>
+                                    <th>Status</th>
+                                    <th>Tokens</th>
+                                    <th>Duration</th>
+                                </tr>
+                            </thead>
+                            <tbody id="logs-tbody">
+                                <tr>
+                                    <td colspan="7" class="loading">Loading logs...</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
+
+                <!-- ANALYTICS VIEW -->
+                <section id="view-analytics" class="view-section">
+                    <div class="tools-grid-header">
+                        <h2>Server Analytics</h2>
+                        <button class="execute-btn" style="width: auto" onclick="loadAnalytics()">Refresh</button>
+                    </div>
+
+                    <div class="analytics-cards" id="analytics-summary">
+                        <!-- Populated by JS -->
+                    </div>
+
+                    <div class="tools-grid-header" style="margin-top: 32px">
+                        <h2>Tool Usage Breakdown</h2>
+                    </div>
+
+                    <div class="analytics-breakdown" id="analytics-breakdown">
+                        <!-- Populated by JS -->
+                    </div>
+                </section>
+
+                <!-- Modal for Full Log Details -->
+                <div id="log-detail-modal" class="modal-backdrop" style="display: none; z-index: 9999;">
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            <h3 id="modal-tool-name" style="margin: 0; font-size: 18px;">Tool Execution Details</h3>
+                            <button class="modal-close" onclick="closeLogModal()"
+                                style="background: none; border: none; color: var(--text-primary); font-size: 24px; cursor: pointer;">&times;</button>
+                        </div>
+                        <div class="modal-body" style="padding: 16px 0;">
+                            <div class="modal-section">
+                                <h4 style="margin-top: 0; margin-bottom: 8px; color: var(--text-secondary);">Parameters
+                                </h4>
+                                <pre id="modal-parameters" class="code-block"
+                                    style="background: var(--bg-color); padding: 12px; border-radius: 6px; overflow-x: auto; white-space: pre-wrap; word-wrap: break-word; font-family: monospace; font-size: 13px; max-height: 300px; overflow-y: auto;"></pre>
+                            </div>
+                            <div class="modal-section" style="margin-top: 16px;">
+                                <h4 style="margin-bottom: 8px; color: var(--text-secondary);">Result</h4>
+                                <pre id="modal-result" class="code-block"
+                                    style="background: var(--bg-color); padding: 12px; border-radius: 6px; overflow-x: auto; white-space: pre-wrap; word-wrap: break-word; font-family: monospace; font-size: 13px; max-height: 300px; overflow-y: auto;"></pre>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+        </main>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+
+</html>

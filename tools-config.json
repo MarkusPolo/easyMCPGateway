@@ -1,0 +1,14 @@
+{
+  "calculator": true,
+  "read_file": true,
+  "write_file": true,
+  "edit_file": true,
+  "apply_patch": true,
+  "grep": true,
+  "find": true,
+  "ls": true,
+  "exec": true,
+  "process": true,
+  "web_fetch": true,
+  "web_search": true
+}
