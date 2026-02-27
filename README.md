@@ -6,4 +6,5 @@ A simple to use dynamic Tool MCP Gateway.
 - Token will be counted
 - Audit Logs
 - Analytics
+- Configurable Human in the Loop for selected Tools
 - Bearer Authentication
