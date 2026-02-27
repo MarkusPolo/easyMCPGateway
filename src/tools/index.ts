@@ -16,3 +16,7 @@ export * from './ProcessTool';
 // Web
 export * from './WebFetchTool';
 export * from './WebSearchTool';
+
+// Memory
+export * from './StoreMemoryTool';
+export * from './RetrieveMemoryTool';

@@ -27,7 +27,7 @@ export class GrepTool extends BaseTool {
         required: ['pattern']
     };
 
-    async execute(args: Record<string, any>): Promise<ToolResponse> {
+    async execute(args: Record<string, any>, profileId?: string): Promise<ToolResponse> {
         const pattern = args.pattern;
         const searchDir = args.path ? scopePath(args.path) : scopePath('.');
         const isRegex = args.regex === true;

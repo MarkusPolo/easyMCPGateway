@@ -23,5 +23,5 @@ export interface ToolResponse {
 export interface ITool {
     category: string;
     definition(): ToolDefinition;
-    execute(args: Record<string, any>): Promise<ToolResponse>;
+    execute(args: Record<string, any>, profileId?: string): Promise<ToolResponse>;
 }

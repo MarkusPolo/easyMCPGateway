@@ -18,7 +18,7 @@ export class ReadFileTool extends BaseTool {
         required: ['path']
     };
 
-    async execute(args: Record<string, any>): Promise<ToolResponse> {
+    async execute(args: Record<string, any>, profileId?: string): Promise<ToolResponse> {
         const { path: requestedPath } = args as { path: string };
 
         try {

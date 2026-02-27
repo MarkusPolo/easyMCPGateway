@@ -19,7 +19,7 @@ export class LsTool extends BaseTool {
         required: []
     };
 
-    async execute(args: Record<string, any>): Promise<ToolResponse> {
+    async execute(args: Record<string, any>, profileId?: string): Promise<ToolResponse> {
         const dirPath = args.path ? scopePath(args.path) : scopePath('.');
 
         if (!fs.existsSync(dirPath)) {

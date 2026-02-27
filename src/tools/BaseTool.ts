@@ -18,5 +18,5 @@ export abstract class BaseTool implements ITool {
         };
     }
 
-    abstract execute(args: Record<string, any>): Promise<ToolResponse>;
+    abstract execute(args: Record<string, any>, profileId?: string): Promise<ToolResponse>;
 }

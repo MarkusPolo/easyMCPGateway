@@ -13,7 +13,9 @@ import {
     ExecTool,
     ProcessTool,
     WebFetchTool,
-    WebSearchTool
+    WebSearchTool,
+    StoreMemoryTool,
+    RetrieveMemoryTool
 } from "./tools";
 
 import * as fs from 'fs';
@@ -110,6 +112,8 @@ export class ToolManager {
         this.registerTool(new ProcessTool());
         this.registerTool(new WebFetchTool());
         this.registerTool(new WebSearchTool());
+        this.registerTool(new StoreMemoryTool());
+        this.registerTool(new RetrieveMemoryTool());
 
         // Ensure all registered tools have a state in all profiles
         let configChanged = false;
@@ -307,14 +311,14 @@ export class ToolManager {
         });
     }
 
-    private async _executeWithLogging(tool: ITool, name: string, args: Record<string, any>, profileName: string): Promise<ToolResponse> {
+    private async _executeWithLogging(tool: ITool, name: string, args: Record<string, any>, profileId: string, profileName: string): Promise<ToolResponse> {
         const start = Date.now();
         let result: ToolResponse;
         let isError = false;
         let resultText = "";
 
         try {
-            result = await tool.execute(args);
+            result = await tool.execute(args, profileId);
             isError = !!result.isError;
             // Best effort capture of response payload for logs
             if (result.content && result.content.length > 0) {
@@ -366,7 +370,7 @@ export class ToolManager {
         const profile = this.getProfileById(profileId);
         const executorName = profile ? `${profile.name} (Web Testing)` : 'Unknown (Web Testing)';
         // Admin UI testing allows testing even if disabled via MCP
-        return await this._executeWithLogging(tool, name, args, executorName);
+        return await this._executeWithLogging(tool, name, args, profileId, executorName);
     }
 
     public registerWithMcp(server: Server, profileId: string = 'default') {
@@ -406,7 +410,7 @@ export class ToolManager {
                 }
             }
 
-            const result = await this._executeWithLogging(tool, name, args, profile?.name || 'Unknown');
+            const result = await this._executeWithLogging(tool, name, args, profileId, profile?.name || 'Unknown');
 
             return {
                 content: result.content,

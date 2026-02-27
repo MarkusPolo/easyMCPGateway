@@ -23,7 +23,7 @@ export class WriteFileTool extends BaseTool {
         required: ['path', 'content']
     };
 
-    async execute(args: Record<string, any>): Promise<ToolResponse> {
+    async execute(args: Record<string, any>, profileId?: string): Promise<ToolResponse> {
         const { path: requestedPath, content } = args as { path: string, content: string };
 
         try {

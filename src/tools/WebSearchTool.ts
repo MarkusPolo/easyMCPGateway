@@ -24,7 +24,7 @@ export class WebSearchTool extends BaseTool {
         required: ['query']
     };
 
-    async execute(args: Record<string, any>): Promise<ToolResponse> {
+    async execute(args: Record<string, any>, profileId?: string): Promise<ToolResponse> {
         const query: string = args.query;
         if (!query) {
             return {

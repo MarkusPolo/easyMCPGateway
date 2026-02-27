@@ -25,7 +25,7 @@ export class CalculatorTool extends BaseTool {
         required: ["operation", "a", "b"]
     };
 
-    async execute(args: Record<string, any>): Promise<ToolResponse> {
+    async execute(args: Record<string, any>, profileId?: string): Promise<ToolResponse> {
         const { operation, a, b } = args as { operation: string; a: number; b: number };
 
         if (typeof a !== 'number' || typeof b !== 'number') {

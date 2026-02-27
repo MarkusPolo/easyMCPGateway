@@ -23,7 +23,7 @@ export class FindTool extends BaseTool {
         required: []
     };
 
-    async execute(args: Record<string, any>): Promise<ToolResponse> {
+    async execute(args: Record<string, any>, profileId?: string): Promise<ToolResponse> {
         const searchDir = args.path ? scopePath(args.path) : scopePath('.');
         const pattern = args.pattern || '*';
         const maxResults = 50;

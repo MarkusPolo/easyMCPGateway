@@ -19,7 +19,7 @@ export class ApplyPatchTool extends BaseTool {
         required: ['patch']
     };
 
-    async execute(args: Record<string, any>): Promise<ToolResponse> {
+    async execute(args: Record<string, any>, profileId?: string): Promise<ToolResponse> {
         const patch: string = args.patch;
 
         if (!patch) {

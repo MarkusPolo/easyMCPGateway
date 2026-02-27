@@ -22,7 +22,7 @@ export class ExecTool extends BaseTool {
         required: ['command']
     };
 
-    async execute(args: Record<string, any>): Promise<ToolResponse> {
+    async execute(args: Record<string, any>, profileId?: string): Promise<ToolResponse> {
         const command: string = args.command;
 
         if (!command) {
