@@ -14,8 +14,11 @@ import {
     ProcessTool,
     WebFetchTool,
     WebSearchTool,
+    BrowserTool,
     StoreMemoryTool,
-    RetrieveMemoryTool
+    RetrieveMemoryTool,
+    MailSendTool,
+    MailReadTool
 } from "./tools";
 
 import * as fs from 'fs';
@@ -112,8 +115,11 @@ export class ToolManager {
         this.registerTool(new ProcessTool());
         this.registerTool(new WebFetchTool());
         this.registerTool(new WebSearchTool());
+        this.registerTool(new BrowserTool());
         this.registerTool(new StoreMemoryTool());
         this.registerTool(new RetrieveMemoryTool());
+        this.registerTool(new MailSendTool());
+        this.registerTool(new MailReadTool());
 
         // Ensure all registered tools have a state in all profiles
         let configChanged = false;

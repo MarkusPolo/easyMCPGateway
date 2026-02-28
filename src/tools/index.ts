@@ -16,7 +16,12 @@ export * from './ProcessTool';
 // Web
 export * from './WebFetchTool';
 export * from './WebSearchTool';
+export * from './BrowserTool';
 
 // Memory
 export * from './StoreMemoryTool';
 export * from './RetrieveMemoryTool';
+
+// Communication
+export * from './MailSendTool';
+export * from './MailReadTool';
