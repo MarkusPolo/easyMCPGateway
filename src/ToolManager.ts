@@ -18,7 +18,17 @@ import {
     StoreMemoryTool,
     RetrieveMemoryTool,
     MailSendTool,
-    MailReadTool
+    MailReadTool,
+    HledgerAddTool,
+    HledgerReportTool,
+    HledgerCheckTool,
+    AccountingArtifactTool,
+    HledgerReverseTool,
+    HledgerLockTool,
+    TicketCreateTool,
+    TicketClaimTool,
+    TicketListTool,
+    TicketUpdateTool
 } from "./tools";
 
 import * as fs from 'fs';
@@ -120,6 +130,16 @@ export class ToolManager {
         this.registerTool(new RetrieveMemoryTool());
         this.registerTool(new MailSendTool());
         this.registerTool(new MailReadTool());
+        this.registerTool(new HledgerAddTool());
+        this.registerTool(new HledgerReportTool());
+        this.registerTool(new HledgerCheckTool());
+        this.registerTool(new AccountingArtifactTool());
+        this.registerTool(new HledgerReverseTool());
+        this.registerTool(new HledgerLockTool());
+        this.registerTool(new TicketCreateTool());
+        this.registerTool(new TicketClaimTool());
+        this.registerTool(new TicketListTool());
+        this.registerTool(new TicketUpdateTool());
 
         // Ensure all registered tools have a state in all profiles
         let configChanged = false;

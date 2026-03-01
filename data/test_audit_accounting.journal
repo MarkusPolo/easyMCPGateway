@@ -1,0 +1,7 @@
+2026-03-01 Vendor Payment  ; id:8ef4db60-ba25-4293-8e44-867c2de172e0, ext:INV-2024-001
+    expenses:rent  1000 EUR
+    assets:bank
+
+2026-03-01 Reversal: Vendor Payment  ; reason: Incorrect amount, rev_of:8ef4db60-ba25-4293-8e44-867c2de172e0
+    assets:bank
+

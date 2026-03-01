@@ -1,0 +1,7 @@
+2026-03-01 Office Supplies  ; vendor:Staples, doc:97cbdd1b78429868
+    expenses:supplies  25 EUR
+    assets:cash
+
+2026-03-01 Reversal: Office Supplies  ; vendor:Staples, doc:97cbdd1b78429868  ; reason: Wrong account
+    assets:cash
+
