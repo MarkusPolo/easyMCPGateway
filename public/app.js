@@ -2,6 +2,32 @@ let cachedTools = [];
 let cachedProfiles = [];
 let activeProfileId = 'default';
 let hitlPollInterval = null;
+let authToken = localStorage.getItem('mcp_admin_token') || '';
+
+function ensureAuthToken() {
+    if (!authToken) {
+        authToken = prompt('Enter a valid Bearer token for Admin API access:') || '';
+        if (authToken) localStorage.setItem('mcp_admin_token', authToken);
+    }
+    return authToken;
+}
+
+function getAuthHeaders(extra = {}) {
+    const token = ensureAuthToken();
+    const headers = { ...extra };
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    return headers;
+}
+
+async function apiFetch(url, options = {}) {
+    const headers = getAuthHeaders(options.headers || {});
+    const res = await fetch(url, { ...options, headers });
+    if (res.status === 401 || res.status === 403) {
+        localStorage.removeItem('mcp_admin_token');
+        authToken = '';
+    }
+    return res;
+}
 
 document.addEventListener('DOMContentLoaded', async () => {
     await fetchProfiles();
@@ -12,7 +38,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
 async function fetchProfiles() {
     try {
-        const res = await fetch('/api/profiles');
+        const res = await apiFetch('/api/profiles');
         cachedProfiles = await res.json();
 
         const selector = document.getElementById('profile-selector');
@@ -52,14 +78,17 @@ function updateTokenUI() {
     if (!profile) return;
     document.getElementById('active-profile-token').textContent = profile.token;
     document.getElementById('delete-profile-btn').style.display = (profile.id === 'default') ? 'none' : 'inline-block';
+    authToken = profile.token;
+    localStorage.setItem('mcp_admin_token', authToken);
 }
+
 
 async function createProfile() {
     const name = prompt("Enter a name for the new AI Agent Profile:");
     if (!name) return;
 
     try {
-        const res = await fetch('/api/profiles', {
+        const res = await apiFetch('/api/profiles', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ name })
@@ -76,7 +105,7 @@ async function createProfile() {
 async function deleteProfile() {
     if (!confirm("Are you sure you want to delete this profile?")) return;
     try {
-        const res = await fetch(`/api/profiles/${activeProfileId}`, { method: 'DELETE' });
+        const res = await apiFetch(`/api/profiles/${activeProfileId}`, { method: 'DELETE' });
         if (res.ok) {
             activeProfileId = 'default';
             await fetchProfiles();
@@ -88,7 +117,7 @@ async function deleteProfile() {
 async function regenerateToken() {
     if (!confirm("Are you sure you want to regenerate the Bearer token? Existing network connections for this Agent will drop immediately.")) return;
     try {
-        const res = await fetch(`/api/profiles/${activeProfileId}/regenerate`, { method: 'POST' });
+        const res = await apiFetch(`/api/profiles/${activeProfileId}/regenerate`, { method: 'POST' });
         if (res.ok) {
             await fetchProfiles();
         }
@@ -105,7 +134,7 @@ function copyToken() {
 
 async function fetchConnections() {
     try {
-        const response = await fetch('/api/connections');
+        const response = await apiFetch('/api/connections');
         const connections = await response.json();
 
         const tbody = document.getElementById('connections-table-body');
@@ -154,6 +183,7 @@ function setupTabs() {
             // Map legacy IDs if needed, else exact match
             const validTargets = {
                 'tools': 'view-tools',
+                'ops-game': 'view-ops-game',
                 'connections': 'connections-view',
                 'logs': 'view-logs',
                 'analytics': 'view-analytics'
@@ -168,6 +198,7 @@ function setupTabs() {
             if (targetId === 'logs') loadAuditLogs(); // Changed from fetchAuditLogs to loadAuditLogs to match existing function name
             if (targetId === 'analytics') loadAnalytics(); // Changed from fetchAnalytics to loadAnalytics to match existing function name
             if (targetId === 'connections') fetchConnections();
+            if (targetId === 'ops-game') loadOpsGameBoard();
         });
     });
 }
@@ -221,7 +252,7 @@ async function loadAuditLogs() {
     tbody.innerHTML = '<tr><td colspan="6" class="loading">Loading logs...</td></tr>';
 
     try {
-        const response = await fetch('/api/audit/logs?limit=100');
+        const response = await apiFetch('/api/audit/logs?limit=100');
         if (!response.ok) throw new Error('Network response was not ok');
         const logs = await response.json();
 
@@ -268,7 +299,7 @@ async function loadAnalytics() {
     breakdownContainer.innerHTML = '';
 
     try {
-        const response = await fetch('/api/audit/analytics');
+        const response = await apiFetch('/api/audit/analytics');
         if (!response.ok) throw new Error('Network response was not ok');
         const data = await response.json();
 
@@ -338,7 +369,7 @@ async function fetchTools() {
     const stats = document.getElementById('tools-stats');
 
     try {
-        const response = await fetch(`/api/tools?profileId=${activeProfileId}`);
+        const response = await apiFetch(`/api/tools?profileId=${activeProfileId}`);
         if (!response.ok) throw new Error('Network response was not ok');
 
         cachedTools = await response.json();
@@ -420,7 +451,7 @@ function renderCategories(tools, grid, stats) {
 
 async function toggleCategory(categoryName, isEnabled) {
     try {
-        const response = await fetch(`/api/categories/${encodeURIComponent(categoryName)}/toggle`, {
+        const response = await apiFetch(`/api/categories/${encodeURIComponent(categoryName)}/toggle`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ isEnabled, profileId: activeProfileId })
@@ -602,7 +633,7 @@ async function executeTool(event, name) {
     outputDiv.textContent = '';
 
     try {
-        const response = await fetch(`/api/tools/${name}/execute?profileId=${activeProfileId}`, {
+        const response = await apiFetch(`/api/tools/${name}/execute?profileId=${activeProfileId}`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -633,7 +664,7 @@ async function executeTool(event, name) {
 
 async function toggleTool(name, isEnabled) {
     try {
-        const response = await fetch(`/api/tools/${name}/toggle`, {
+        const response = await apiFetch(`/api/tools/${name}/toggle`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -667,7 +698,7 @@ function escapeHtml(unsafe) {
 
 async function toggleApproval(name, requiresApproval) {
     try {
-        const response = await fetch(`/api/tools/${name}/approval`, {
+        const response = await apiFetch(`/api/tools/${name}/approval`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ requiresApproval, profileId: activeProfileId })
@@ -693,7 +724,7 @@ function toggleHitlPanel() {
 
 async function fetchPendingApprovals() {
     try {
-        const res = await fetch('/api/hitl/pending');
+        const res = await apiFetch('/api/hitl/pending');
         const pending = await res.json();
         renderPendingApprovals(pending);
         updateHitlBadge(pending.length);
@@ -752,7 +783,7 @@ function renderPendingApprovals(pending) {
 
 async function approveRequest(id) {
     try {
-        const res = await fetch(`/api/hitl/${id}/approve`, { method: 'POST' });
+        const res = await apiFetch(`/api/hitl/${id}/approve`, { method: 'POST' });
         if (!res.ok) throw new Error('Failed to approve');
         fetchPendingApprovals();
     } catch (e) {
@@ -762,7 +793,7 @@ async function approveRequest(id) {
 
 async function rejectRequest(id) {
     try {
-        const res = await fetch(`/api/hitl/${id}/reject`, {
+        const res = await apiFetch(`/api/hitl/${id}/reject`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ reason: 'Rejected by administrator' })
@@ -778,7 +809,7 @@ function startHitlPolling() {
     if (hitlPollInterval) clearInterval(hitlPollInterval);
     hitlPollInterval = setInterval(async () => {
         try {
-            const res = await fetch('/api/hitl/pending');
+            const res = await apiFetch('/api/hitl/pending');
             const pending = await res.json();
             updateHitlBadge(pending.length);
             // If panel is visible, refresh its content too
@@ -788,4 +819,98 @@ function startHitlPolling() {
             }
         } catch (e) { /* silent */ }
     }, 3000);
+}
+
+
+async function loadOpsGameBoard() {
+    const summary = document.getElementById('ops-game-summary');
+    const board = document.getElementById('ops-game-board');
+    if (!summary || !board) return;
+    summary.innerHTML = '<div class="loading">Loading summary...</div>';
+    board.innerHTML = '<div class="loading">Loading agents...</div>';
+
+    try {
+        const [workersRes, ticketsRes, runsRes, connsRes] = await Promise.all([
+            apiFetch('/api/workers'),
+            apiFetch('/api/tickets'),
+            apiFetch('/api/runs?limit=200'),
+            apiFetch('/api/connections')
+        ]);
+
+        const workers = await workersRes.json();
+        const tickets = await ticketsRes.json();
+        const runs = await runsRes.json();
+        const connections = await connsRes.json();
+
+        const activeWorkers = workers.filter(w => w.status === 'active');
+        const sleeping = activeWorkers.filter(w => new Date(w.next_wake_at) > new Date()).length;
+        const claimedTickets = tickets.filter(t => ['claimed', 'in_progress', 'waiting_review'].includes(t.status));
+
+        summary.innerHTML = `
+            <div class="ops-metric"><div class="ops-metric-label">Active Agents</div><div class="ops-metric-value">${activeWorkers.length + 1}</div></div>
+            <div class="ops-metric"><div class="ops-metric-label">Sleeping</div><div class="ops-metric-value">${sleeping}</div></div>
+            <div class="ops-metric"><div class="ops-metric-label">Claimed/In Progress</div><div class="ops-metric-value">${claimedTickets.length}</div></div>
+            <div class="ops-metric"><div class="ops-metric-label">Online Connections</div><div class="ops-metric-value">${connections.length}</div></div>
+        `;
+
+        const cards = [];
+
+        const supervisorClaims = claimedTickets.filter(t => (t.claimed_by || '').includes('Supervisor') || (t.claimed_by || '').includes('default'));
+        cards.push(renderAgentCard({
+            name: 'Supervisor-CEO',
+            role: 'Supervisor',
+            sleeping: false,
+            claimed: supervisorClaims,
+            runs: runs.filter(r => r.worker_id === 'supervisor').slice(0, 3),
+            tools: ['ticket_*', 'hire_worker', 'layoff_worker', 'schedule_*', 'supervisor_context']
+        }));
+
+        for (const w of activeWorkers) {
+            const workerClaims = claimedTickets.filter(t => t.claimed_by === w.profile_id || (t.target_role_hint && t.target_role_hint === w.role));
+            const workerRuns = runs.filter(r => r.worker_id === w.worker_id).slice(0, 3);
+            const isSleeping = new Date(w.next_wake_at) > new Date();
+            cards.push(renderAgentCard({
+                name: w.name,
+                role: w.role,
+                sleeping: isSleeping,
+                claimed: workerClaims,
+                runs: workerRuns,
+                tools: (w.allowed_tools || []).slice(0, 8)
+            }));
+        }
+
+        board.innerHTML = cards.join('');
+    } catch (error) {
+        console.error('Failed to load Ops Game board', error);
+        board.innerHTML = '<div style="color: var(--danger-color)">Failed to load board.</div>';
+    }
+}
+
+function renderAgentCard(agent) {
+    const claimed = agent.claimed.length > 0
+        ? `<ul class="agent-list">${agent.claimed.slice(0, 4).map(t => `<li>${t.status} · ${t.title}</li>`).join('')}</ul>`
+        : '<div class="agent-role">No claimed tickets</div>';
+
+    const runs = agent.runs.length > 0
+        ? `<ul class="agent-list">${agent.runs.map(r => `<li>${r.status} · ${new Date(r.started_at).toLocaleTimeString()}</li>`).join('')}</ul>`
+        : '<div class="agent-role">No recent runs</div>';
+
+    const tools = `<div class="agent-role">Tools: ${(agent.tools || []).join(', ') || 'n/a'}</div>`;
+
+    return `
+        <div class="agent-card ${agent.sleeping ? 'sleeping' : ''}">
+            <div class="agent-header">
+                <div>
+                    <div class="agent-name">${agent.name}</div>
+                    <div class="agent-role">${agent.role}</div>
+                </div>
+                <span class="agent-state ${agent.sleeping ? 'sleeping' : ''}">${agent.sleeping ? 'Sleeping' : 'Active'}</span>
+            </div>
+            ${tools}
+            <div class="agent-role" style="margin-top:8px;">Claimed / Working on</div>
+            ${claimed}
+            <div class="agent-role" style="margin-top:8px;">Recent runs</div>
+            ${runs}
+        </div>
+    `;
 }

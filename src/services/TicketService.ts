@@ -3,6 +3,18 @@ import { open, Database } from 'sqlite';
 import * as path from 'path';
 import * as crypto from 'crypto';
 import { Ticket, TicketStatus, TicketCategory } from '../tools/types';
+import { reviewService } from './ReviewService';
+
+const TRANSITIONS: Record<TicketStatus, TicketStatus[]> = {
+    new: ['ready', 'canceled'],
+    ready: ['claimed', 'blocked', 'canceled'],
+    claimed: ['in_progress', 'ready', 'blocked', 'canceled'],
+    in_progress: ['waiting_review', 'blocked', 'ready', 'canceled'],
+    waiting_review: ['done', 'in_progress', 'blocked', 'canceled'],
+    blocked: ['ready', 'canceled'],
+    done: [],
+    canceled: []
+};
 
 export class TicketService {
     private dbPath: string;
@@ -16,10 +28,7 @@ export class TicketService {
 
     private async init() {
         try {
-            this.db = await open({
-                filename: this.dbPath,
-                driver: sqlite3.Database
-            });
+            this.db = await open({ filename: this.dbPath, driver: sqlite3.Database });
 
             await this.db.exec(`
                 CREATE TABLE IF NOT EXISTS tickets (
@@ -105,7 +114,7 @@ export class TicketService {
             id: data.id || crypto.randomUUID(),
             title: data.title,
             description: data.description,
-            status: data.status || 'ready', // Usually starts as ready
+            status: data.status || 'ready',
             category: data.category || 'ops',
             priority: data.priority || 5,
             target_role_hint: data.target_role_hint,
@@ -156,18 +165,9 @@ export class TicketService {
         let query = 'SELECT * FROM tickets WHERE 1=1';
         const params: any[] = [];
 
-        if (filters?.status) {
-            query += ' AND status = ?';
-            params.push(filters.status);
-        }
-        if (filters?.category) {
-            query += ' AND category = ?';
-            params.push(filters.category);
-        }
-        if (filters?.target_role_hint) {
-            query += ' AND target_role_hint = ?';
-            params.push(filters.target_role_hint);
-        }
+        if (filters?.status) { query += ' AND status = ?'; params.push(filters.status); }
+        if (filters?.category) { query += ' AND category = ?'; params.push(filters.category); }
+        if (filters?.target_role_hint) { query += ' AND target_role_hint = ?'; params.push(filters.target_role_hint); }
 
         const rows = await this.db.all(query, params);
         return rows.map(r => this.deserializeTicket(r));
@@ -183,7 +183,6 @@ export class TicketService {
         const now = new Date();
         const nowIso = now.toISOString();
 
-        // Steal rule: lease_until < now OR heartbeat_at < now - heartbeat_grace (2 mins)
         let canClaim = false;
         if (ticket.status === 'ready') {
             canClaim = true;
@@ -191,9 +190,7 @@ export class TicketService {
             const leaseExpired = ticket.lease_until && new Date(ticket.lease_until) < now;
             const heartbeatGrace = new Date(now.getTime() - 2 * 60 * 1000);
             const heartbeatExpired = ticket.heartbeat_at && new Date(ticket.heartbeat_at) < heartbeatGrace;
-            if (leaseExpired || heartbeatExpired) {
-                canClaim = true;
-            }
+            if (leaseExpired || heartbeatExpired) canClaim = true;
         }
 
         if (!canClaim) {
@@ -201,12 +198,11 @@ export class TicketService {
         }
 
         if (ticket.attempts >= maxAttempts) {
-            // Cancel ticket if max attempts reached
-            await this.updateTicket(ticketId, 'canceled', { reason: 'Max attempts reached during claim' });
+            await this.updateTicket(ticketId, 'canceled', { reason: 'Max attempts reached during claim' }, { actorId: 'scheduler' });
             throw new Error(`Ticket canceled due to exceeding max attempts (${maxAttempts})`);
         }
 
-        const leaseDurationMs = 5 * 60 * 1000; // 5 minute lease
+        const leaseDurationMs = 5 * 60 * 1000;
         const leaseUntil = new Date(now.getTime() + leaseDurationMs).toISOString();
 
         ticket.status = 'claimed';
@@ -248,16 +244,42 @@ export class TicketService {
         return true;
     }
 
-    public async updateTicket(ticketId: string, status: TicketStatus, updates: Partial<Ticket> = {}): Promise<Ticket> {
+    public async updateTicket(ticketId: string, status: TicketStatus, updates: Partial<Ticket> = {}, opts?: { actorId?: string; isPrivileged?: boolean }): Promise<Ticket> {
         await this.initPromise;
         if (!this.db) throw new Error("DB not initialized");
 
         const ticket = await this.getTicket(ticketId);
         if (!ticket) throw new Error("Ticket not found");
 
-        const nowIso = new Date().toISOString();
+        const actorId = opts?.actorId;
+        const isPrivileged = !!opts?.isPrivileged;
 
-        // Update fields safely
+        if (ticket.status !== status && !TRANSITIONS[ticket.status].includes(status) && !isPrivileged) {
+            throw new Error(`Invalid state transition: ${ticket.status} -> ${status}`);
+        }
+
+        if (!isPrivileged && actorId) {
+            const actorRequired = ['in_progress', 'waiting_review', 'blocked'];
+            if (actorRequired.includes(status) && ticket.claimed_by && ticket.claimed_by !== actorId) {
+                throw new Error(`Only claimed worker (${ticket.claimed_by}) can set status ${status}.`);
+            }
+            if (status === 'done' && ticket.status === 'waiting_review' && ticket.claimed_by === actorId) {
+                throw new Error('Claimed worker cannot self-approve done from waiting_review. Reviewer/CEO required.');
+            }
+        }
+
+        if (status === 'blocked' && !updates.reason && !ticket.reason) {
+            throw new Error('Blocked status requires reason.');
+        }
+
+        if (status === 'done' && ticket.status === 'waiting_review' && !isPrivileged) {
+            const approved = await reviewService.hasApprovedReview(ticketId);
+            if (!approved) {
+                throw new Error('Cannot move to done without approved review (confidence >= 0.9).');
+            }
+        }
+
+        const nowIso = new Date().toISOString();
         const setClauses: string[] = ['status = ?', 'updated_at = ?'];
         const values: any[] = [status, nowIso];
 

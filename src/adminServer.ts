@@ -4,6 +4,14 @@ import * as path from 'path';
 import { ToolManager } from './ToolManager';
 import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import { workerService } from './services/WorkerService';
+import * as fs from 'fs';
+import { onboardingService } from './services/OnboardingService';
+import { supervisorContextService } from './services/SupervisorContextService';
+import { opsService } from './services/OpsService';
+import { workerRunService } from './services/WorkerRunService';
+import { reviewService } from './services/ReviewService';
+import { ticketService } from './services/TicketService';
 
 export function startAdminServer(toolManager: ToolManager, port: number = 8080) {
     const app = express();
@@ -24,19 +32,189 @@ export function startAdminServer(toolManager: ToolManager, port: number = 8080) 
     const publicDir = path.join(process.cwd(), 'public');
     app.use(express.static(publicDir));
 
+    // API authentication + minimal authorization hardening
+    app.use('/api', (req, res, next) => {
+        const authHeader = req.headers.authorization;
+        if (!authHeader || !authHeader.startsWith('Bearer ')) {
+            return res.status(401).json({ error: 'Unauthorized. Missing Bearer token.' });
+        }
+
+        const token = authHeader.split(' ')[1];
+        const profile = toolManager.getProfileByToken(token);
+        if (!profile) {
+            return res.status(403).json({ error: 'Forbidden. Invalid token.' });
+        }
+
+        (req as any).authProfile = profile;
+        next();
+    });
+
+    const requirePrivileged = (req: any, res: any, next: any) => {
+        const authProfile = req.authProfile;
+        if (!authProfile || !toolManager.isPrivilegedProfile(authProfile.id)) {
+            return res.status(403).json({ error: 'Forbidden. Privileged profile required.' });
+        }
+        next();
+    };
+
+    const getRole = (profile: any): 'investor' | 'supervisor' | 'advisor' | 'worker' => {
+        const n = String(profile?.name || '').toLowerCase();
+        if (n.includes('marius') || n.includes('investor')) return 'investor';
+        if (toolManager.isPrivilegedProfile(profile?.id)) return 'supervisor';
+        if (n.includes('advisor') || n.includes('accountant')) return 'advisor';
+        return 'worker';
+    };
+
+    const requireRoles = (roles: Array<'investor' | 'supervisor' | 'advisor' | 'worker'>) => (req: any, res: any, next: any) => {
+        const role = getRole(req.authProfile);
+        if (!roles.includes(role)) {
+            return res.status(403).json({ error: `Forbidden. Required roles: ${roles.join(', ')}` });
+        }
+        next();
+    };
+
     // --- Profile Management API ---
     app.get('/api/profiles', (req, res) => {
         res.json(toolManager.getProfiles());
     });
 
-    app.post('/api/profiles', (req, res) => {
+    app.post('/api/profiles', requirePrivileged, (req, res) => {
         const { name } = req.body;
         if (!name) return res.status(400).json({ error: "Name is required" });
         const newProfile = toolManager.createProfile(name);
         res.json(newProfile);
     });
 
-    app.delete('/api/profiles/:id', (req, res) => {
+    // --- Worker Management API ---
+    app.get('/api/workers', async (req, res) => {
+        try {
+            const status = req.query.status as 'active' | 'fired' | undefined;
+            const workers = await workerService.listWorkers(status);
+            res.json(workers);
+        } catch (error: any) {
+            res.status(500).json({ error: error.message || 'Failed to list workers' });
+        }
+    });
+
+    app.get('/api/tickets', async (req, res) => {
+        try {
+            const status = req.query.status as string | undefined;
+            const category = req.query.category as string | undefined;
+            const targetRole = req.query.target_role_hint as string | undefined;
+            const tickets = await ticketService.listTickets({ status, category, target_role_hint: targetRole });
+            res.json(tickets);
+        } catch (error: any) {
+            res.status(500).json({ error: error.message || 'Failed to list tickets' });
+        }
+    });
+
+    app.post('/api/workers/hire', requireRoles(['supervisor']), async (req, res) => {
+        try {
+            const { worker_name, role, allowed_tools, job_posting, job_posting_path, principles_path = 'principles.md', wake_interval_minutes = 30 } = req.body;
+            if (!worker_name || !role || !Array.isArray(allowed_tools)) {
+                return res.status(400).json({ error: 'worker_name, role, allowed_tools are required.' });
+            }
+
+            let posting = job_posting || '';
+            if (!posting && job_posting_path) {
+                posting = fs.readFileSync(path.resolve(process.cwd(), job_posting_path), 'utf-8');
+            }
+            if (!posting) {
+                return res.status(400).json({ error: 'job_posting or job_posting_path is required.' });
+            }
+
+            const principlesFile = path.resolve(process.cwd(), principles_path);
+            const principles = fs.existsSync(principlesFile)
+                ? fs.readFileSync(principlesFile, 'utf-8')
+                : 'No principles.md found.';
+
+            const profile = toolManager.createProfileWithTools(worker_name, allowed_tools);
+            const systemPrompt = ['# Company Principles', principles, '', '# Job Posting', posting].join('\n');
+
+            const worker = await workerService.hireWorker({
+                profile_id: profile.id,
+                name: worker_name,
+                role,
+                system_prompt: systemPrompt,
+                allowed_tools,
+                wake_interval_minutes
+            });
+
+            res.json({ worker, profile_id: profile.id, bearer_token: profile.token });
+        } catch (error: any) {
+            res.status(500).json({ error: error.message || 'Failed to hire worker' });
+        }
+    });
+
+    app.post('/api/workers/:id/fire', requireRoles(['supervisor']), async (req, res) => {
+        try {
+            const worker = await workerService.fireWorker(req.params.id);
+            const revoked = toolManager.deleteProfile(worker.profile_id);
+            res.json({ worker, profile_revoked: revoked });
+        } catch (error: any) {
+            res.status(400).json({ error: error.message || 'Failed to fire worker' });
+        }
+    });
+
+    // --- Onboarding API ---
+    app.get('/api/onboarding/status', (req, res) => {
+        res.json(onboardingService.getStatus());
+    });
+
+    app.post('/api/onboarding/complete', requirePrivileged, (req, res) => {
+        const state = onboardingService.markCompleted();
+        res.json({ success: true, state });
+    });
+
+    app.get('/api/supervisor/context', async (req, res) => {
+        try {
+            const context = await supervisorContextService.buildLatestContext();
+            res.json({ context });
+        } catch (error: any) {
+            res.status(500).json({ error: error.message || 'Failed to build supervisor context' });
+        }
+    });
+
+    app.get('/api/reviews', async (req, res) => {
+        try {
+            const ticketId = req.query.ticketId as string | undefined;
+            const reviews = await reviewService.listReviews(ticketId);
+            res.json(reviews);
+        } catch (error: any) {
+            res.status(500).json({ error: error.message || 'Failed to list reviews' });
+        }
+    });
+
+    app.get('/api/runs', async (req, res) => {
+        try {
+            const limit = parseInt(req.query.limit as string) || 100;
+            const runs = await workerRunService.listRuns(limit);
+            res.json(runs);
+        } catch (error: any) {
+            res.status(500).json({ error: error.message || 'Failed to list runs' });
+        }
+    });
+
+    app.get('/api/health/live', (req, res) => {
+        res.json(opsService.liveness());
+    });
+
+    app.get('/api/health/ready', async (req, res) => {
+        const ready = await opsService.readiness();
+        if (!ready.ok) return res.status(503).json(ready);
+        res.json(ready);
+    });
+
+    app.get('/api/metrics', async (req, res) => {
+        try {
+            const metrics = await opsService.metrics();
+            res.json(metrics);
+        } catch (error: any) {
+            res.status(500).json({ error: error.message || 'Failed to fetch metrics' });
+        }
+    });
+
+    app.delete('/api/profiles/:id', requirePrivileged, (req, res) => {
         const success = toolManager.deleteProfile(req.params.id);
         if (success) {
             res.json({ success: true });
@@ -45,7 +223,7 @@ export function startAdminServer(toolManager: ToolManager, port: number = 8080) 
         }
     });
 
-    app.post('/api/profiles/:id/regenerate', (req, res) => {
+    app.post('/api/profiles/:id/regenerate', requirePrivileged, (req, res) => {
         const token = toolManager.regenerateToken(req.params.id);
         if (token) {
             res.json({ success: true, token });
@@ -65,7 +243,7 @@ export function startAdminServer(toolManager: ToolManager, port: number = 8080) 
         }
     });
 
-    app.post('/api/tools/:name/toggle', (req, res) => {
+    app.post('/api/tools/:name/toggle', requirePrivileged, (req, res) => {
         const name = req.params.name;
         const { isEnabled, profileId = 'default' } = req.body;
 
@@ -82,7 +260,7 @@ export function startAdminServer(toolManager: ToolManager, port: number = 8080) 
         }
     });
 
-    app.post('/api/categories/:name/toggle', (req, res) => {
+    app.post('/api/categories/:name/toggle', requirePrivileged, (req, res) => {
         const categoryName = req.params.name;
         const { isEnabled, profileId = 'default' } = req.body;
 
@@ -103,6 +281,11 @@ export function startAdminServer(toolManager: ToolManager, port: number = 8080) 
         const name = req.params.name;
         const profileId = req.query.profileId as string || 'default';
         const args = req.body || {};
+        const authProfile = (req as any).authProfile;
+
+        if (authProfile.id !== profileId && !toolManager.isPrivilegedProfile(authProfile.id)) {
+            return res.status(403).json({ error: 'Forbidden. Cannot execute tools for other profiles.' });
+        }
 
         try {
             const result = await toolManager.executeTool(name, args, profileId);
@@ -113,7 +296,7 @@ export function startAdminServer(toolManager: ToolManager, port: number = 8080) 
     });
 
     // --- Human in the Loop (HITL) API ---
-    app.post('/api/tools/:name/approval', (req, res) => {
+    app.post('/api/tools/:name/approval', requirePrivileged, (req, res) => {
         const name = req.params.name;
         const { requiresApproval, profileId = 'default' } = req.body;
 
@@ -134,7 +317,7 @@ export function startAdminServer(toolManager: ToolManager, port: number = 8080) 
         res.json(toolManager.getPendingApprovals());
     });
 
-    app.post('/api/hitl/:id/approve', (req, res) => {
+    app.post('/api/hitl/:id/approve', requirePrivileged, (req, res) => {
         const success = toolManager.approveRequest(req.params.id);
         if (success) {
             res.json({ success: true });
@@ -143,7 +326,7 @@ export function startAdminServer(toolManager: ToolManager, port: number = 8080) 
         }
     });
 
-    app.post('/api/hitl/:id/reject', (req, res) => {
+    app.post('/api/hitl/:id/reject', requirePrivileged, (req, res) => {
         const reason = req.body?.reason;
         const success = toolManager.rejectRequest(req.params.id, reason);
         if (success) {
