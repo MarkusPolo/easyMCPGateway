@@ -1,6 +1,8 @@
 import { BaseTool } from './BaseTool';
 import { ToolResponse } from './types';
 import * as dotenv from 'dotenv';
+import { policyEngineService } from '../services/PolicyEngineService';
+import * as crypto from 'crypto';
 
 // Read from .env file
 dotenv.config();
@@ -57,12 +59,24 @@ export class MailSendTool extends BaseTool {
                 throw new Error('Mail API key not configured. Register "MAIL_API_KEY" in .env.');
             }
 
+            const idempotencyKey = args.idempotency_key || crypto.createHash('sha256').update(`${to}|${subject}|${text || ''}|${html || ''}`).digest('hex');
+            const decision = await policyEngineService.evaluate({
+                profile_id: profileId || 'unknown',
+                capability: 'send_mail',
+                idempotency_key: idempotencyKey,
+                resource: to
+            });
+            if (!decision.allowed) {
+                throw new Error(`Policy denied send_mail: ${decision.reason}`);
+            }
+
             const url = `${this.OUT_URL}/send`;
             const response = await fetch(url, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'X-API-Key': apiKey
+                    'X-API-Key': apiKey,
+                    'X-Idempotency-Key': idempotencyKey
                 },
                 body: JSON.stringify({ to, subject, html, text })
             });

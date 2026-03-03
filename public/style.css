@@ -1033,3 +1033,103 @@ input:checked+.slider:before {
 .tool-approval-label .shield-icon {
     font-size: 14px;
 }
+/* Ops Game Board */
+.ops-game-summary {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 12px;
+    margin-bottom: 16px;
+}
+
+.ops-metric {
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    padding: 12px;
+}
+
+.ops-metric-label {
+    color: var(--text-secondary);
+    font-size: 12px;
+}
+
+.ops-metric-value {
+    font-size: 22px;
+    font-weight: 700;
+    color: var(--accent-color);
+}
+
+.ops-game-board {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 14px;
+}
+
+.agent-card {
+    background: linear-gradient(180deg, rgba(88,166,255,0.09), rgba(33,38,45,0.92));
+    border: 1px solid rgba(88, 166, 255, 0.25);
+    border-radius: 12px;
+    padding: 14px;
+}
+
+.agent-card.sleeping {
+    border-color: rgba(139, 148, 158, 0.35);
+    background: linear-gradient(180deg, rgba(139,148,158,0.08), rgba(33,38,45,0.92));
+}
+
+.agent-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+}
+
+.agent-name {
+    font-weight: 700;
+}
+
+.agent-role {
+    color: var(--text-secondary);
+    font-size: 12px;
+}
+
+.agent-state {
+    font-size: 11px;
+    padding: 3px 8px;
+    border-radius: 999px;
+    border: 1px solid rgba(46, 160, 67, 0.4);
+    color: var(--success-color);
+}
+
+.agent-state.sleeping {
+    color: #8b949e;
+    border-color: rgba(139, 148, 158, 0.45);
+}
+
+.agent-list {
+    margin-top: 8px;
+    padding-left: 16px;
+    color: var(--text-secondary);
+    font-size: 12px;
+}
+
+
+.status-pill {
+    display: inline-flex;
+    align-items: center;
+    border: 1px solid var(--border-color);
+    border-radius: 999px;
+    padding: 6px 12px;
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+.status-pill.running {
+    color: var(--success-color);
+    border-color: rgba(46, 160, 67, 0.4);
+}
+
+.status-pill.blocked {
+    color: var(--warning-color);
+    border-color: rgba(210, 153, 34, 0.4);
+}
