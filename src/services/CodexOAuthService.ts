@@ -56,6 +56,34 @@ export class CodexOAuthService {
         };
     }
 
+
+    private spawnCodex(args: string[]) {
+        const env = this.codexEnv();
+        const cwd = process.cwd();
+
+        try {
+            return spawn(this.npxCommand(), ['-y', '@openai/codex', ...args], {
+                env,
+                cwd,
+                stdio: ['ignore', 'pipe', 'pipe']
+            });
+        } catch (primaryError) {
+            if (process.platform === 'win32') {
+                try {
+                    const command = ['npx', '-y', '@openai/codex', ...args].join(' ');
+                    return spawn('cmd.exe', ['/d', '/s', '/c', command], {
+                        env,
+                        cwd,
+                        stdio: ['ignore', 'pipe', 'pipe']
+                    });
+                } catch {
+                    throw primaryError;
+                }
+            }
+            throw primaryError;
+        }
+    }
+
     private parseLoginOutput(login: ActiveLogin) {
         const urlMatch = login.output.match(/https:\/\/auth\.openai\.com\/codex\/device/);
         const codeMatch = login.output.match(/\b[A-Z0-9]{4,}-[A-Z0-9]{4,}\b/);
@@ -66,11 +94,14 @@ export class CodexOAuthService {
     private runCodex(args: string[]): Promise<{ code: number | null; stdout: string; stderr: string }> {
         this.ensureCodexHome();
         return new Promise((resolve) => {
-            const child = spawn(this.npxCommand(), ['-y', '@openai/codex', ...args], {
-                env: this.codexEnv(),
-                cwd: process.cwd(),
-                stdio: ['ignore', 'pipe', 'pipe']
-            });
+            let child: ChildProcess;
+            try {
+                child = this.spawnCodex(args);
+            } catch (err) {
+                const msg = (err as Error)?.message || String(err);
+                resolve({ code: 1, stdout: '', stderr: `spawn_error:${msg}` });
+                return;
+            }
             let stdout = '';
             let stderr = '';
             child.stdout.on('data', (d) => (stdout += d.toString()));
@@ -119,11 +150,13 @@ export class CodexOAuthService {
         }
 
         this.ensureCodexHome();
-        const child = spawn(this.npxCommand(), ['-y', '@openai/codex', 'login', '--device-auth'], {
-            env: this.codexEnv(),
-            cwd: process.cwd(),
-            stdio: ['ignore', 'pipe', 'pipe']
-        });
+        let child: ChildProcess;
+        try {
+            child = this.spawnCodex(['login', '--device-auth']);
+        } catch (err) {
+            const msg = (err as Error)?.message || String(err);
+            throw new Error(`Failed to spawn Codex CLI: ${msg}`);
+        }
 
         const login: ActiveLogin = {
             process: child,
