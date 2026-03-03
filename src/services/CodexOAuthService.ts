@@ -1,6 +1,7 @@
 import { spawn, ChildProcess } from 'child_process';
 import * as path from 'path';
 import * as fs from 'fs';
+import * as os from 'os';
 
 export interface CodexAuthStatus {
     connected: boolean;
@@ -41,6 +42,20 @@ export class CodexOAuthService {
         }
     }
 
+
+    private npxCommand(): string {
+        if (process.platform === 'win32') return 'npx.cmd';
+        return 'npx';
+    }
+
+    private codexEnv() {
+        return {
+            ...process.env,
+            CODEX_HOME: this.codexHome,
+            PATH: process.env.PATH || process.env.Path || process.env.path || ''
+        };
+    }
+
     private parseLoginOutput(login: ActiveLogin) {
         const urlMatch = login.output.match(/https:\/\/auth\.openai\.com\/codex\/device/);
         const codeMatch = login.output.match(/\b[A-Z0-9]{4,}-[A-Z0-9]{4,}\b/);
@@ -51,8 +66,8 @@ export class CodexOAuthService {
     private runCodex(args: string[]): Promise<{ code: number | null; stdout: string; stderr: string }> {
         this.ensureCodexHome();
         return new Promise((resolve) => {
-            const child = spawn('npx', ['-y', '@openai/codex', ...args], {
-                env: { ...process.env, CODEX_HOME: this.codexHome },
+            const child = spawn(this.npxCommand(), ['-y', '@openai/codex', ...args], {
+                env: this.codexEnv(),
                 cwd: process.cwd(),
                 stdio: ['ignore', 'pipe', 'pipe']
             });
@@ -60,6 +75,10 @@ export class CodexOAuthService {
             let stderr = '';
             child.stdout.on('data', (d) => (stdout += d.toString()));
             child.stderr.on('data', (d) => (stderr += d.toString()));
+            child.on('error', (err) => {
+                stderr += `spawn_error:${(err as Error).message}`;
+                resolve({ code: 1, stdout, stderr });
+            });
             child.on('close', (code) => resolve({ code, stdout, stderr }));
         });
     }
@@ -68,6 +87,7 @@ export class CodexOAuthService {
         const result = await this.runCodex(['login', 'status']);
         const text = `${result.stdout}\n${result.stderr}`;
         const connected = /logged in|authenticated/i.test(text) && !/not logged in/i.test(text);
+        const spawnError = /spawn_error:/i.test(text);
 
         return {
             connected,
@@ -82,7 +102,7 @@ export class CodexOAuthService {
                     completed: this.activeLogin.done
                 }
                 : undefined,
-            last_error: this.activeLogin?.error
+            last_error: this.activeLogin?.error || (spawnError ? `Codex CLI not available in PATH on ${os.platform()}. Install Node/npm and ensure npx is available.` : undefined)
         };
     }
 
@@ -99,8 +119,8 @@ export class CodexOAuthService {
         }
 
         this.ensureCodexHome();
-        const child = spawn('npx', ['-y', '@openai/codex', 'login', '--device-auth'], {
-            env: { ...process.env, CODEX_HOME: this.codexHome },
+        const child = spawn(this.npxCommand(), ['-y', '@openai/codex', 'login', '--device-auth'], {
+            env: this.codexEnv(),
             cwd: process.cwd(),
             stdio: ['ignore', 'pipe', 'pipe']
         });
@@ -120,6 +140,10 @@ export class CodexOAuthService {
         child.stderr.on('data', (d) => {
             login.output += d.toString();
             this.parseLoginOutput(login);
+        });
+        child.on('error', (err) => {
+            login.done = true;
+            login.error = `Failed to spawn ${this.npxCommand()}: ${(err as Error).message}`;
         });
         child.on('close', (code) => {
             login.done = true;
@@ -142,7 +166,7 @@ export class CodexOAuthService {
             await new Promise((r) => setTimeout(r, 200));
         }
 
-        throw new Error(`Failed to get device code from Codex CLI output. Output: ${login.output.slice(0, 600)}`);
+        throw new Error(login.error || `Failed to get device code from Codex CLI output. Output: ${login.output.slice(0, 600)}`);
     }
 }
 
