@@ -12,6 +12,8 @@ interface OAuthSession {
 export interface CodexAuthStatus {
     connected: boolean;
     provider: 'codex';
+    oauth_configured: boolean;
+    configured_redirect_uri?: string;
     updated_at?: string;
     expires_at?: string;
 }
@@ -44,14 +46,44 @@ export class CodexOAuthService {
         return input.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
     }
 
+
+    private getOAuthConfig() {
+        const authUrl = process.env.CODEX_OAUTH_AUTH_URL || 'https://auth.openai.com/oauth/authorize';
+        const tokenUrl = process.env.CODEX_OAUTH_TOKEN_URL || '';
+        const clientId = process.env.CODEX_OAUTH_CLIENT_ID || '';
+        const configuredRedirectUri = process.env.CODEX_OAUTH_REDIRECT_URI || '';
+
+        return {
+            authUrl,
+            tokenUrl,
+            clientId,
+            configuredRedirectUri,
+            scope: process.env.CODEX_OAUTH_SCOPE || 'openid profile offline_access'
+        };
+    }
+
+    private assertOAuthConfigured() {
+        const cfg = this.getOAuthConfig();
+        if (!cfg.clientId) {
+            throw new Error('CODEX_OAUTH_CLIENT_ID is missing. Register an OAuth app and configure CODEX_OAUTH_CLIENT_ID first.');
+        }
+        if (!cfg.tokenUrl) {
+            throw new Error('CODEX_OAUTH_TOKEN_URL is missing. Configure OAuth token endpoint before login.');
+        }
+        return cfg;
+    }
+
     public async getStatus(): Promise<CodexAuthStatus> {
         await this.initPromise;
         if (!this.db) throw new Error('OAuth DB not initialized');
+        const cfg = this.getOAuthConfig();
         const row = await this.db.get('SELECT provider, expires_at, updated_at FROM llm_oauth_tokens WHERE provider = ?', 'codex');
-        if (!row) return { connected: false, provider: 'codex' };
+        if (!row) return { connected: false, provider: 'codex', oauth_configured: Boolean(cfg.clientId && cfg.tokenUrl), configured_redirect_uri: cfg.configuredRedirectUri || undefined };
         return {
             connected: true,
             provider: 'codex',
+            oauth_configured: Boolean(cfg.clientId && cfg.tokenUrl),
+            configured_redirect_uri: cfg.configuredRedirectUri || undefined,
             expires_at: row.expires_at || undefined,
             updated_at: row.updated_at
         };
@@ -68,14 +100,15 @@ export class CodexOAuthService {
             createdAt: new Date().toISOString()
         });
 
-        const authBase = process.env.CODEX_OAUTH_AUTH_URL || 'https://auth.openai.com/oauth/authorize';
-        const clientId = process.env.CODEX_OAUTH_CLIENT_ID || 'codex-local-gateway';
+        const cfg = this.assertOAuthConfigured();
+        const authBase = cfg.authUrl;
+        const clientId = cfg.clientId;
 
         const url = new URL(authBase);
         url.searchParams.set('response_type', 'code');
         url.searchParams.set('client_id', clientId);
         url.searchParams.set('redirect_uri', redirectUri);
-        url.searchParams.set('scope', process.env.CODEX_OAUTH_SCOPE || 'openid profile offline_access');
+        url.searchParams.set('scope', cfg.scope);
         url.searchParams.set('state', state);
         url.searchParams.set('code_challenge_method', 'S256');
         url.searchParams.set('code_challenge', challenge);
@@ -84,17 +117,15 @@ export class CodexOAuthService {
     }
 
     public async handleCallback(params: { code: string; state: string; redirectUri: string }): Promise<void> {
-        const tokenUrl = process.env.CODEX_OAUTH_TOKEN_URL;
-        if (!tokenUrl) {
-            throw new Error('CODEX_OAUTH_TOKEN_URL is not configured. Set it to exchange OAuth code for token.');
-        }
+        const cfg = this.assertOAuthConfigured();
+        const tokenUrl = cfg.tokenUrl;
 
         const session = this.pendingSessions.get(params.state);
         if (!session) {
             throw new Error('Invalid OAuth state');
         }
 
-        const clientId = process.env.CODEX_OAUTH_CLIENT_ID || 'codex-local-gateway';
+        const clientId = cfg.clientId;
         const clientSecret = process.env.CODEX_OAUTH_CLIENT_SECRET;
 
         const body = new URLSearchParams();
