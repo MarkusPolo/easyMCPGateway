@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { BaseTool } from './BaseTool';
 import { ToolResponse } from './types';
-import { scopePath } from '../utils/pathUtils';
+import { scopeProfilePath } from '../utils/pathUtils';
 
 export class WriteFileTool extends BaseTool {
     name = 'write_file';
@@ -25,9 +25,10 @@ export class WriteFileTool extends BaseTool {
 
     async execute(args: Record<string, any>, profileId?: string): Promise<ToolResponse> {
         const { path: requestedPath, content } = args as { path: string, content: string };
+        const effectiveProfileId = profileId || 'default';
 
         try {
-            const filePath = scopePath(requestedPath);
+            const filePath = scopeProfilePath(requestedPath, effectiveProfileId);
             const dir = path.dirname(filePath);
 
             if (!fs.existsSync(dir)) {

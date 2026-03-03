@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { BaseTool } from './BaseTool';
 import { ToolResponse } from './types';
-import { scopePath } from '../utils/pathUtils';
+import { scopeProfilePath } from '../utils/pathUtils';
 
 export class ApplyPatchTool extends BaseTool {
     name = 'apply_patch';
@@ -21,6 +21,7 @@ export class ApplyPatchTool extends BaseTool {
 
     async execute(args: Record<string, any>, profileId?: string): Promise<ToolResponse> {
         const patch: string = args.patch;
+        const effectiveProfileId = profileId || 'default';
 
         if (!patch) {
             return {
@@ -34,7 +35,7 @@ export class ApplyPatchTool extends BaseTool {
             const hunks = this.parsePatch(patch);
 
             for (const hunk of hunks) {
-                const filePath = scopePath(hunk.file);
+                const filePath = scopeProfilePath(hunk.file, effectiveProfileId);
 
                 let content = '';
                 if (fs.existsSync(filePath)) {

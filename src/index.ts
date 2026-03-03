@@ -1,7 +1,10 @@
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import * as dotenv from 'dotenv';
 import { ToolManager } from "./ToolManager";
 import { startAdminServer } from "./adminServer";
+
+dotenv.config();
 
 async function main() {
     const server = new Server(

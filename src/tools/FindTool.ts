@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { BaseTool } from './BaseTool';
 import { ToolResponse } from './types';
-import { scopePath } from '../utils/pathUtils';
+import { getProfileWorkspaceRoot, scopeProfilePath } from '../utils/pathUtils';
 
 export class FindTool extends BaseTool {
     name = 'find';
@@ -24,7 +24,11 @@ export class FindTool extends BaseTool {
     };
 
     async execute(args: Record<string, any>, profileId?: string): Promise<ToolResponse> {
-        const searchDir = args.path ? scopePath(args.path) : scopePath('.');
+        const effectiveProfileId = profileId || 'default';
+        const workspaceRoot = getProfileWorkspaceRoot(effectiveProfileId);
+        const searchDir = args.path
+            ? scopeProfilePath(args.path, effectiveProfileId)
+            : scopeProfilePath('.', effectiveProfileId);
         const pattern = args.pattern || '*';
         const maxResults = 50;
 
@@ -55,13 +59,13 @@ export class FindTool extends BaseTool {
                 if (entry.isDirectory()) {
                     if (!entry.name.startsWith('.') && entry.name !== 'node_modules') {
                         if (regex.test(entry.name)) {
-                            results.push(path.relative(scopePath('.'), fullPath));
+                            results.push(path.relative(workspaceRoot, fullPath));
                         }
                         walk(fullPath);
                     }
                 } else {
                     if (regex.test(entry.name)) {
-                        results.push(path.relative(scopePath('.'), fullPath));
+                        results.push(path.relative(workspaceRoot, fullPath));
                     }
                 }
             }

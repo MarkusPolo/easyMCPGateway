@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { BaseTool } from './BaseTool';
 import { ToolResponse } from './types';
-import { scopePath } from '../utils/pathUtils';
+import { scopeProfilePath } from '../utils/pathUtils';
 
 export class LsTool extends BaseTool {
     name = 'ls';
@@ -20,7 +20,10 @@ export class LsTool extends BaseTool {
     };
 
     async execute(args: Record<string, any>, profileId?: string): Promise<ToolResponse> {
-        const dirPath = args.path ? scopePath(args.path) : scopePath('.');
+        const effectiveProfileId = profileId || 'default';
+        const dirPath = args.path
+            ? scopeProfilePath(args.path, effectiveProfileId)
+            : scopeProfilePath('.', effectiveProfileId);
 
         if (!fs.existsSync(dirPath)) {
             return {

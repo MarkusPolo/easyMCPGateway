@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import { BaseTool } from './BaseTool';
 import { ToolResponse } from './types';
-import { scopePath } from '../utils/pathUtils';
+import { scopeProfilePath } from '../utils/pathUtils';
 
 export class EditFileTool extends BaseTool {
     name = 'edit_file';
@@ -40,9 +40,10 @@ export class EditFileTool extends BaseTool {
 
     async execute(args: Record<string, any>, profileId?: string): Promise<ToolResponse> {
         const { path: requestedPath, edits: editsArray, target, replacement } = args;
+        const effectiveProfileId = profileId || 'default';
 
         try {
-            const filePath = scopePath(requestedPath);
+            const filePath = scopeProfilePath(requestedPath, effectiveProfileId);
 
             if (!fs.existsSync(filePath)) {
                 return {

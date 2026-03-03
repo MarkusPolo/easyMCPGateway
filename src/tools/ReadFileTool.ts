@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import { BaseTool } from './BaseTool';
 import { ToolResponse } from './types';
-import { scopePath } from '../utils/pathUtils';
+import { scopeProfilePath } from '../utils/pathUtils';
 
 export class ReadFileTool extends BaseTool {
     name = 'read_file';
@@ -20,9 +20,10 @@ export class ReadFileTool extends BaseTool {
 
     async execute(args: Record<string, any>, profileId?: string): Promise<ToolResponse> {
         const { path: requestedPath } = args as { path: string };
+        const effectiveProfileId = profileId || 'default';
 
         try {
-            const filePath = scopePath(requestedPath);
+            const filePath = scopeProfilePath(requestedPath, effectiveProfileId);
 
             if (!fs.existsSync(filePath)) {
                 return {

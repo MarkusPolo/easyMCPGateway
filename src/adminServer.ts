@@ -1,5 +1,4 @@
 import express from 'express';
-import cors from 'cors';
 import * as path from 'path';
 import { ToolManager } from './ToolManager';
 import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
@@ -8,7 +7,10 @@ import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 export function startAdminServer(toolManager: ToolManager, port: number = 8080) {
     const app = express();
 
-    app.use(cors());
+    const adminApiToken = process.env.ADMIN_API_TOKEN?.trim();
+    if (!adminApiToken) {
+        throw new Error("Missing required ADMIN_API_TOKEN environment variable. Refusing to start insecure admin API.");
+    }
 
     // Only apply JSON parser to non-message routes
     // handlePostMessage consumes the raw request stream natively
@@ -23,6 +25,24 @@ export function startAdminServer(toolManager: ToolManager, port: number = 8080) 
     // Serve static files from the 'public' directory
     const publicDir = path.join(process.cwd(), 'public');
     app.use(express.static(publicDir));
+
+    const requireAdminApiAuth: express.RequestHandler = (req, res, next) => {
+        const authHeader = req.headers.authorization;
+        if (!authHeader || !authHeader.startsWith('Bearer ')) {
+            res.status(401).json({ error: 'Unauthorized. Provide a valid Bearer token.' });
+            return;
+        }
+
+        const token = authHeader.slice('Bearer '.length);
+        if (token !== adminApiToken) {
+            res.status(403).json({ error: 'Forbidden: Invalid admin token.' });
+            return;
+        }
+
+        next();
+    };
+
+    app.use('/api', requireAdminApiAuth);
 
     // --- Profile Management API ---
     app.get('/api/profiles', (req, res) => {
@@ -130,12 +150,30 @@ export function startAdminServer(toolManager: ToolManager, port: number = 8080) 
         }
     });
 
+    app.post('/api/tools/:name/approval-timeout', (req, res) => {
+        const name = req.params.name;
+        const { timeoutMs, profileId = 'default' } = req.body;
+
+        if (typeof timeoutMs !== 'number' || !Number.isFinite(timeoutMs)) {
+            return res.status(400).json({ error: "Invalid payload. 'timeoutMs' must be a finite number (milliseconds)." });
+        }
+
+        const success = toolManager.setToolApprovalTimeout(profileId, name, timeoutMs);
+
+        if (success) {
+            res.json({ success: true, name, profileId, timeoutMs: Math.floor(timeoutMs) });
+        } else {
+            res.status(400).json({ error: `Failed to set timeout. Verify tool/profile and timeout range.` });
+        }
+    });
+
     app.get('/api/hitl/pending', (req, res) => {
         res.json(toolManager.getPendingApprovals());
     });
 
-    app.post('/api/hitl/:id/approve', (req, res) => {
-        const success = toolManager.approveRequest(req.params.id);
+    app.post('/api/hitl/:id/approve', requireAdminApiAuth, (req, res) => {
+        const requestId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+        const success = toolManager.approveRequest(requestId);
         if (success) {
             res.json({ success: true });
         } else {
@@ -143,9 +181,10 @@ export function startAdminServer(toolManager: ToolManager, port: number = 8080) 
         }
     });
 
-    app.post('/api/hitl/:id/reject', (req, res) => {
+    app.post('/api/hitl/:id/reject', requireAdminApiAuth, (req, res) => {
+        const requestId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
         const reason = req.body?.reason;
-        const success = toolManager.rejectRequest(req.params.id, reason);
+        const success = toolManager.rejectRequest(requestId, reason);
         if (success) {
             res.json({ success: true });
         } else {

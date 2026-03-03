@@ -36,6 +36,7 @@ import * as path from 'path';
 import { AuditLogger } from "./audit/AuditLogger";
 import { encode } from 'gpt-tokenizer';
 import * as crypto from 'crypto';
+import { vaultService } from "./utils/VaultService";
 
 export interface Profile {
     id: string;
@@ -43,6 +44,7 @@ export interface Profile {
     token: string;
     enabledTools: Record<string, boolean>;
     requiresApproval: Record<string, boolean>;
+    approvalTimeoutMs: Record<string, number>;
 }
 
 export interface PendingApproval {
@@ -52,11 +54,15 @@ export interface PendingApproval {
     profileId: string;
     profileName: string;
     createdAt: string;
+    timeoutMs: number;
+    expiresAt: string;
     resolve: (decision: 'approved') => void;
     reject: (reason: string) => void;
 }
 
 const HITL_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
+const MIN_HITL_TIMEOUT_MS = 5 * 1000; // 5 seconds
+const MAX_HITL_TIMEOUT_MS = 60 * 60 * 1000; // 1 hour
 
 export class ToolManager {
     private tools: Map<string, ITool> = new Map();
@@ -91,7 +97,8 @@ export class ToolManager {
                 name: 'Local Admin',
                 token: 'mcp-default-' + crypto.randomBytes(8).toString('hex'),
                 enabledTools: {},
-                requiresApproval: {}
+                requiresApproval: {},
+                approvalTimeoutMs: {}
             }
         ];
         this.saveConfig();
@@ -148,6 +155,10 @@ export class ToolManager {
                 profile.requiresApproval = {};
                 configChanged = true;
             }
+            if (!profile.approvalTimeoutMs) {
+                profile.approvalTimeoutMs = {};
+                configChanged = true;
+            }
             for (const name of this.tools.keys()) {
                 if (profile.enabledTools[name] === undefined) {
                     profile.enabledTools[name] = true; // default to enabled
@@ -155,6 +166,10 @@ export class ToolManager {
                 }
                 if (profile.requiresApproval[name] === undefined) {
                     profile.requiresApproval[name] = false; // default to no approval
+                    configChanged = true;
+                }
+                if (profile.approvalTimeoutMs[name] === undefined) {
+                    profile.approvalTimeoutMs[name] = HITL_TIMEOUT_MS;
                     configChanged = true;
                 }
             }
@@ -191,11 +206,13 @@ export class ToolManager {
             name,
             token: 'mcp-' + crypto.randomBytes(16).toString('hex'),
             enabledTools: {},
-            requiresApproval: {}
+            requiresApproval: {},
+            approvalTimeoutMs: {}
         };
         for (const toolName of this.tools.keys()) {
             newProfile.enabledTools[toolName] = true; // Enabled by default
             newProfile.requiresApproval[toolName] = false; // No approval by default
+            newProfile.approvalTimeoutMs[toolName] = HITL_TIMEOUT_MS;
         }
         this.profiles.push(newProfile);
         this.saveConfig();
@@ -236,7 +253,8 @@ export class ToolManager {
                 category: def.category,
                 inputSchema: def.inputSchema,
                 isEnabled: profile.enabledTools[def.name] ?? true,
-                requiresApproval: profile.requiresApproval?.[def.name] ?? false
+                requiresApproval: profile.requiresApproval?.[def.name] ?? false,
+                approvalTimeoutMs: profile.approvalTimeoutMs?.[def.name] ?? HITL_TIMEOUT_MS
             };
         });
     }
@@ -283,6 +301,29 @@ export class ToolManager {
         return false;
     }
 
+    public setToolApprovalTimeout(profileId: string, name: string, timeoutMs: number): boolean {
+        const profile = this.getProfileById(profileId);
+        if (!profile || !this.tools.has(name)) return false;
+
+        if (!Number.isFinite(timeoutMs)) return false;
+        const normalized = Math.floor(timeoutMs);
+        if (normalized < MIN_HITL_TIMEOUT_MS || normalized > MAX_HITL_TIMEOUT_MS) return false;
+
+        if (!profile.approvalTimeoutMs) profile.approvalTimeoutMs = {};
+        profile.approvalTimeoutMs[name] = normalized;
+        this.saveConfig();
+        return true;
+    }
+
+    private getApprovalTimeoutMs(profileId: string, toolName: string): number {
+        const profile = this.getProfileById(profileId);
+        const timeout = profile?.approvalTimeoutMs?.[toolName];
+        if (!Number.isFinite(timeout as number)) return HITL_TIMEOUT_MS;
+        const normalized = Math.floor(timeout as number);
+        if (normalized < MIN_HITL_TIMEOUT_MS || normalized > MAX_HITL_TIMEOUT_MS) return HITL_TIMEOUT_MS;
+        return normalized;
+    }
+
     // HITL: Pending approvals queue
     public getPendingApprovals() {
         return Array.from(this.pendingApprovals.values()).map(p => ({
@@ -291,7 +332,9 @@ export class ToolManager {
             args: p.args,
             profileId: p.profileId,
             profileName: p.profileName,
-            createdAt: p.createdAt
+            createdAt: p.createdAt,
+            timeoutMs: p.timeoutMs,
+            expiresAt: p.expiresAt
         }));
     }
 
@@ -313,6 +356,9 @@ export class ToolManager {
 
     private waitForApproval(toolName: string, args: Record<string, any>, profileId: string, profileName: string): Promise<void> {
         const id = crypto.randomUUID();
+        const timeoutMs = this.getApprovalTimeoutMs(profileId, toolName);
+        const createdAt = new Date();
+        const expiresAt = new Date(createdAt.getTime() + timeoutMs);
         return new Promise<void>((resolve, reject) => {
             const pending: PendingApproval = {
                 id,
@@ -320,7 +366,9 @@ export class ToolManager {
                 args,
                 profileId,
                 profileName,
-                createdAt: new Date().toISOString(),
+                createdAt: createdAt.toISOString(),
+                timeoutMs,
+                expiresAt: expiresAt.toISOString(),
                 resolve: () => resolve(),
                 reject: (reason: string) => reject(new Error(reason))
             };
@@ -331,9 +379,9 @@ export class ToolManager {
             setTimeout(() => {
                 if (this.pendingApprovals.has(id)) {
                     this.pendingApprovals.delete(id);
-                    reject(new Error(`Approval timed out after ${HITL_TIMEOUT_MS / 1000}s for tool "${toolName}"`));
+                    reject(new Error(`Approval timed out after ${Math.floor(timeoutMs / 1000)}s for tool "${toolName}"`));
                 }
-            }, HITL_TIMEOUT_MS);
+            }, timeoutMs);
         });
     }
 
@@ -383,6 +431,21 @@ export class ToolManager {
             token_usage: tokenUsage,
             profile_name: profileName
         }).catch(console.error);
+
+        // Fire and forget: create system-generated markdown session history per profile/day.
+        try {
+            vaultService.appendSessionEvent(
+                profileId,
+                profileName,
+                name,
+                args,
+                resultText,
+                isError ? 'error' : 'success',
+                duration
+            );
+        } catch (e) {
+            console.error("Failed to append vault session history:", e);
+        }
 
         return result;
     }

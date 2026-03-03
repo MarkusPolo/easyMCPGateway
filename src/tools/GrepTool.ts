@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { BaseTool } from './BaseTool';
 import { ToolResponse } from './types';
-import { scopePath } from '../utils/pathUtils';
+import { getProfileWorkspaceRoot, scopeProfilePath } from '../utils/pathUtils';
 
 export class GrepTool extends BaseTool {
     name = 'grep';
@@ -29,7 +29,11 @@ export class GrepTool extends BaseTool {
 
     async execute(args: Record<string, any>, profileId?: string): Promise<ToolResponse> {
         const pattern = args.pattern;
-        const searchDir = args.path ? scopePath(args.path) : scopePath('.');
+        const effectiveProfileId = profileId || 'default';
+        const workspaceRoot = getProfileWorkspaceRoot(effectiveProfileId);
+        const searchDir = args.path
+            ? scopeProfilePath(args.path, effectiveProfileId)
+            : scopeProfilePath('.', effectiveProfileId);
         const isRegex = args.regex === true;
 
         if (!fs.existsSync(searchDir)) {
@@ -62,7 +66,7 @@ export class GrepTool extends BaseTool {
                             const found = regex ? regex.test(lines[i]) : lines[i].toLowerCase().includes(pattern.toLowerCase());
                             if (found) {
                                 matches.push({
-                                    file: path.relative(scopePath('.'), fullPath),
+                                    file: path.relative(workspaceRoot, fullPath),
                                     line: i + 1,
                                     content: lines[i].trim()
                                 });

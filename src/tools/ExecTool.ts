@@ -1,7 +1,7 @@
 import { execSync } from 'child_process';
 import { BaseTool } from './BaseTool';
 import { ToolResponse } from './types';
-import { scopePath } from '../utils/pathUtils';
+import { getProfileWorkspaceRoot } from '../utils/pathUtils';
 
 export class ExecTool extends BaseTool {
     name = 'exec';
@@ -24,6 +24,7 @@ export class ExecTool extends BaseTool {
 
     async execute(args: Record<string, any>, profileId?: string): Promise<ToolResponse> {
         const command: string = args.command;
+        const effectiveProfileId = profileId || 'default';
 
         if (!command) {
             return {
@@ -33,7 +34,7 @@ export class ExecTool extends BaseTool {
         }
 
         const timeoutMs = args.timeout_ms || 30000;
-        const workspaceRoot = scopePath('.');
+        const workspaceRoot = getProfileWorkspaceRoot(effectiveProfileId);
 
         try {
             const stdout = execSync(command, {
@@ -49,7 +50,8 @@ export class ExecTool extends BaseTool {
                     type: "text", text: JSON.stringify({
                         stdout: stdout.toString().substring(0, 10000), // Cap output
                         stderr: '',
-                        exit_code: 0
+                        exit_code: 0,
+                        workspace_root: workspaceRoot
                     }, null, 2)
                 }]
             };
@@ -61,6 +63,7 @@ export class ExecTool extends BaseTool {
                         stdout: (error.stdout || '').toString().substring(0, 10000),
                         stderr: (error.stderr || '').toString().substring(0, 5000),
                         exit_code: error.status || (isTimeout ? 124 : 1),
+                        workspace_root: workspaceRoot,
                         error: isTimeout ? `Command timed out after ${timeoutMs}ms` : error.message
                     }, null, 2)
                 }],

@@ -1,18 +1,77 @@
-let cachedTools = [];
+﻿let cachedTools = [];
 let cachedProfiles = [];
 let activeProfileId = 'default';
 let hitlPollInterval = null;
+const ADMIN_TOKEN_STORAGE_KEY = 'adminApiToken';
+const HITL_TIMEOUT_PRESETS_MS = [30000, 60000, 120000, 300000, 600000, 900000, 1800000, 3600000];
+
+function getAdminToken() {
+    return localStorage.getItem(ADMIN_TOKEN_STORAGE_KEY) || '';
+}
+
+function setAdminToken(token) {
+    localStorage.setItem(ADMIN_TOKEN_STORAGE_KEY, token);
+}
+
+function clearAdminToken() {
+    localStorage.removeItem(ADMIN_TOKEN_STORAGE_KEY);
+}
+
+function promptForAdminToken() {
+    const token = prompt('Enter ADMIN API token:');
+    if (!token || !token.trim()) {
+        throw new Error('Admin API token is required.');
+    }
+    const trimmed = token.trim();
+    setAdminToken(trimmed);
+    return trimmed;
+}
+
+async function apiFetch(url, options = {}) {
+    let token = getAdminToken();
+    if (!token) {
+        token = promptForAdminToken();
+    }
+
+    const mergedHeaders = {
+        ...(options.headers || {}),
+        Authorization: `Bearer ${token}`
+    };
+
+    let response = await fetch(url, { ...options, headers: mergedHeaders });
+    if (response.status === 401 || response.status === 403) {
+        clearAdminToken();
+        token = promptForAdminToken();
+        response = await fetch(url, {
+            ...options,
+            headers: {
+                ...(options.headers || {}),
+                Authorization: `Bearer ${token}`
+            }
+        });
+    }
+
+    return response;
+}
 
 document.addEventListener('DOMContentLoaded', async () => {
-    await fetchProfiles();
-    fetchTools();
-    setupTabs();
-    startHitlPolling();
+    try {
+        if (!getAdminToken()) {
+            promptForAdminToken();
+        }
+        await fetchProfiles();
+        fetchTools();
+        setupTabs();
+        startHitlPolling();
+    } catch (error) {
+        alert(error.message || 'Admin API token is required.');
+        console.error('Failed to initialize admin UI:', error);
+    }
 });
 
 async function fetchProfiles() {
     try {
-        const res = await fetch('/api/profiles');
+        const res = await apiFetch('/api/profiles');
         cachedProfiles = await res.json();
 
         const selector = document.getElementById('profile-selector');
@@ -59,7 +118,7 @@ async function createProfile() {
     if (!name) return;
 
     try {
-        const res = await fetch('/api/profiles', {
+        const res = await apiFetch('/api/profiles', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ name })
@@ -76,7 +135,7 @@ async function createProfile() {
 async function deleteProfile() {
     if (!confirm("Are you sure you want to delete this profile?")) return;
     try {
-        const res = await fetch(`/api/profiles/${activeProfileId}`, { method: 'DELETE' });
+        const res = await apiFetch(`/api/profiles/${activeProfileId}`, { method: 'DELETE' });
         if (res.ok) {
             activeProfileId = 'default';
             await fetchProfiles();
@@ -88,7 +147,7 @@ async function deleteProfile() {
 async function regenerateToken() {
     if (!confirm("Are you sure you want to regenerate the Bearer token? Existing network connections for this Agent will drop immediately.")) return;
     try {
-        const res = await fetch(`/api/profiles/${activeProfileId}/regenerate`, { method: 'POST' });
+        const res = await apiFetch(`/api/profiles/${activeProfileId}/regenerate`, { method: 'POST' });
         if (res.ok) {
             await fetchProfiles();
         }
@@ -105,7 +164,7 @@ function copyToken() {
 
 async function fetchConnections() {
     try {
-        const response = await fetch('/api/connections');
+        const response = await apiFetch('/api/connections');
         const connections = await response.json();
 
         const tbody = document.getElementById('connections-table-body');
@@ -221,7 +280,7 @@ async function loadAuditLogs() {
     tbody.innerHTML = '<tr><td colspan="6" class="loading">Loading logs...</td></tr>';
 
     try {
-        const response = await fetch('/api/audit/logs?limit=100');
+        const response = await apiFetch('/api/audit/logs?limit=100');
         if (!response.ok) throw new Error('Network response was not ok');
         const logs = await response.json();
 
@@ -268,7 +327,7 @@ async function loadAnalytics() {
     breakdownContainer.innerHTML = '';
 
     try {
-        const response = await fetch('/api/audit/analytics');
+        const response = await apiFetch('/api/audit/analytics');
         if (!response.ok) throw new Error('Network response was not ok');
         const data = await response.json();
 
@@ -338,7 +397,7 @@ async function fetchTools() {
     const stats = document.getElementById('tools-stats');
 
     try {
-        const response = await fetch(`/api/tools?profileId=${activeProfileId}`);
+        const response = await apiFetch(`/api/tools?profileId=${activeProfileId}`);
         if (!response.ok) throw new Error('Network response was not ok');
 
         cachedTools = await response.json();
@@ -420,7 +479,7 @@ function renderCategories(tools, grid, stats) {
 
 async function toggleCategory(categoryName, isEnabled) {
     try {
-        const response = await fetch(`/api/categories/${encodeURIComponent(categoryName)}/toggle`, {
+        const response = await apiFetch(`/api/categories/${encodeURIComponent(categoryName)}/toggle`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ isEnabled, profileId: activeProfileId })
@@ -482,6 +541,10 @@ function renderTools(tools, grid, stats) {
 
     tools.forEach((tool, index) => {
         if (tool.isEnabled) enabledCount++;
+        const toolDomId = toToolDomId(tool.name);
+        const timeoutMs = normalizeTimeoutMs(tool.approvalTimeoutMs);
+        const timeoutMinutes = Math.max(1, Math.round(timeoutMs / 60000));
+        const presetValue = getTimeoutPresetValue(timeoutMs);
 
         const card = document.createElement('div');
         card.className = `tool-card ${tool.isEnabled ? 'enabled' : 'disabled'}`;
@@ -505,13 +568,35 @@ function renderTools(tools, grid, stats) {
                 <button class="tool-test-btn" onclick="toggleTestPanel('${tool.name}')">Test Tool</button>
             </div>
             <div class="tool-approval-row">
-                <span class="tool-approval-label"><span class="shield-icon">🛡️</span> Require Approval</span>
+                <span class="tool-approval-label"><span class="shield-icon">[HITL]</span> Require Approval</span>
                 <label class="switch" style="width:36px; height:20px;">
                     <input type="checkbox" onchange="toggleApproval('${tool.name}', this.checked)" ${tool.requiresApproval ? 'checked' : ''}>
                     <span class="slider" style="border-radius:20px;"></span>
                 </label>
             </div>
-            
+            <div class="tool-timeout-row">
+                <span class="tool-timeout-label">Approval Timeout</span>
+                <select class="tool-timeout-select" id="timeout-select-${toolDomId}" onchange="onTimeoutPresetChange('${tool.name}', this.value)" ${tool.requiresApproval ? '' : 'disabled'}>
+                    <option value="30000" ${presetValue === 30000 ? 'selected' : ''}>30s</option>
+                    <option value="60000" ${presetValue === 60000 ? 'selected' : ''}>1m</option>
+                    <option value="120000" ${presetValue === 120000 ? 'selected' : ''}>2m</option>
+                    <option value="300000" ${presetValue === 300000 ? 'selected' : ''}>5m</option>
+                    <option value="600000" ${presetValue === 600000 ? 'selected' : ''}>10m</option>
+                    <option value="900000" ${presetValue === 900000 ? 'selected' : ''}>15m</option>
+                    <option value="1800000" ${presetValue === 1800000 ? 'selected' : ''}>30m</option>
+                    <option value="3600000" ${presetValue === 3600000 ? 'selected' : ''}>60m</option>
+                    <option value="custom" ${presetValue === 'custom' ? 'selected' : ''}>Custom</option>
+                </select>
+            </div>
+            <div class="tool-timeout-slider-row">
+                <input type="range" min="1" max="60" step="1" value="${timeoutMinutes}" class="tool-timeout-slider"
+                    id="timeout-slider-${toolDomId}"
+                    oninput="onTimeoutSliderInput('${tool.name}', this.value)"
+                    onchange="onTimeoutSliderCommit('${tool.name}', this.value)"
+                    ${tool.requiresApproval ? '' : 'disabled'}>
+                <span class="tool-timeout-value" id="timeout-value-${toolDomId}">${formatTimeoutMs(timeoutMs)}</span>
+            </div>
+
             <div class="test-panel" id="test-panel-${tool.name}">
                 <form id="form-${tool.name}" onsubmit="executeTool(event, '${tool.name}')">
                     ${formBuilderHMTL}
@@ -526,7 +611,6 @@ function renderTools(tools, grid, stats) {
 
     stats.textContent = `${enabledCount} of ${tools.length} Tools Active`;
 }
-
 function buildFormHtml(tool) {
     if (!tool.inputSchema || !tool.inputSchema.properties) {
         return '<p style="color:var(--text-secondary); margin-bottom: 12px; font-size:12px;">No parameters required.</p>';
@@ -602,7 +686,7 @@ async function executeTool(event, name) {
     outputDiv.textContent = '';
 
     try {
-        const response = await fetch(`/api/tools/${name}/execute?profileId=${activeProfileId}`, {
+        const response = await apiFetch(`/api/tools/${name}/execute?profileId=${activeProfileId}`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -633,7 +717,7 @@ async function executeTool(event, name) {
 
 async function toggleTool(name, isEnabled) {
     try {
-        const response = await fetch(`/api/tools/${name}/toggle`, {
+        const response = await apiFetch(`/api/tools/${name}/toggle`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -667,7 +751,7 @@ function escapeHtml(unsafe) {
 
 async function toggleApproval(name, requiresApproval) {
     try {
-        const response = await fetch(`/api/tools/${name}/approval`, {
+        const response = await apiFetch(`/api/tools/${name}/approval`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ requiresApproval, profileId: activeProfileId })
@@ -677,6 +761,70 @@ async function toggleApproval(name, requiresApproval) {
     } catch (error) {
         console.error(`Failed to toggle approval for ${name}:`, error);
         alert(`Error toggling approval for ${name}. Please try again.`);
+        fetchTools();
+    }
+}
+
+function toToolDomId(toolName) {
+    return (toolName || 'tool').toString().replace(/[^a-zA-Z0-9_-]/g, '_');
+}
+
+function normalizeTimeoutMs(timeoutMs) {
+    const parsed = Number(timeoutMs);
+    if (!Number.isFinite(parsed)) return 300000;
+    return Math.min(3600000, Math.max(5000, Math.floor(parsed)));
+}
+
+function getTimeoutPresetValue(timeoutMs) {
+    if (HITL_TIMEOUT_PRESETS_MS.includes(timeoutMs)) return timeoutMs;
+    return 'custom';
+}
+
+function formatTimeoutMs(timeoutMs) {
+    if (timeoutMs < 60000) return `${Math.round(timeoutMs / 1000)}s`;
+    return `${Math.round(timeoutMs / 60000)}m`;
+}
+
+function onTimeoutPresetChange(toolName, presetValue) {
+    if (presetValue === 'custom') return;
+    const timeoutMs = normalizeTimeoutMs(Number(presetValue));
+    const toolDomId = toToolDomId(toolName);
+    const slider = document.getElementById(`timeout-slider-${toolDomId}`);
+    const label = document.getElementById(`timeout-value-${toolDomId}`);
+    if (slider) slider.value = Math.max(1, Math.round(timeoutMs / 60000));
+    if (label) label.textContent = formatTimeoutMs(timeoutMs);
+    setApprovalTimeout(toolName, timeoutMs);
+}
+
+function onTimeoutSliderInput(toolName, minutesValue) {
+    const minutes = Math.max(1, Math.min(60, Number(minutesValue) || 1));
+    const timeoutMs = minutes * 60000;
+    const toolDomId = toToolDomId(toolName);
+    const label = document.getElementById(`timeout-value-${toolDomId}`);
+    const select = document.getElementById(`timeout-select-${toolDomId}`);
+    if (label) label.textContent = formatTimeoutMs(timeoutMs);
+    if (select) select.value = HITL_TIMEOUT_PRESETS_MS.includes(timeoutMs) ? String(timeoutMs) : 'custom';
+}
+
+function onTimeoutSliderCommit(toolName, minutesValue) {
+    const minutes = Math.max(1, Math.min(60, Number(minutesValue) || 1));
+    const timeoutMs = normalizeTimeoutMs(minutes * 60000);
+    setApprovalTimeout(toolName, timeoutMs);
+}
+
+async function setApprovalTimeout(name, timeoutMs) {
+    try {
+        const response = await apiFetch(`/api/tools/${name}/approval-timeout`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ timeoutMs, profileId: activeProfileId })
+        });
+        if (!response.ok) throw new Error('Failed to update approval timeout');
+        const tool = cachedTools.find(t => t.name === name);
+        if (tool) tool.approvalTimeoutMs = timeoutMs;
+    } catch (error) {
+        console.error(`Failed to update timeout for ${name}:`, error);
+        alert(`Error updating HITL timeout for ${name}.`);
         fetchTools();
     }
 }
@@ -693,7 +841,7 @@ function toggleHitlPanel() {
 
 async function fetchPendingApprovals() {
     try {
-        const res = await fetch('/api/hitl/pending');
+        const res = await apiFetch('/api/hitl/pending');
         const pending = await res.json();
         renderPendingApprovals(pending);
         updateHitlBadge(pending.length);
@@ -741,8 +889,8 @@ function renderPendingApprovals(pending) {
                 <div class="hitl-request-args">${escapeHtml(argsDisplay)}</div>
                 <div class="hitl-request-time">Requested: ${time}</div>
                 <div class="hitl-request-actions">
-                    <button class="hitl-approve-btn" onclick="approveRequest('${req.id}')">✓ Approve</button>
-                    <button class="hitl-reject-btn" onclick="rejectRequest('${req.id}')">✕ Reject</button>
+                    <button class="hitl-approve-btn" onclick="approveRequest('${req.id}')">âœ“ Approve</button>
+                    <button class="hitl-reject-btn" onclick="rejectRequest('${req.id}')">âœ• Reject</button>
                 </div>
             </div>
         `;
@@ -752,7 +900,7 @@ function renderPendingApprovals(pending) {
 
 async function approveRequest(id) {
     try {
-        const res = await fetch(`/api/hitl/${id}/approve`, { method: 'POST' });
+        const res = await apiFetch(`/api/hitl/${id}/approve`, { method: 'POST' });
         if (!res.ok) throw new Error('Failed to approve');
         fetchPendingApprovals();
     } catch (e) {
@@ -762,7 +910,7 @@ async function approveRequest(id) {
 
 async function rejectRequest(id) {
     try {
-        const res = await fetch(`/api/hitl/${id}/reject`, {
+        const res = await apiFetch(`/api/hitl/${id}/reject`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ reason: 'Rejected by administrator' })
@@ -778,7 +926,7 @@ function startHitlPolling() {
     if (hitlPollInterval) clearInterval(hitlPollInterval);
     hitlPollInterval = setInterval(async () => {
         try {
-            const res = await fetch('/api/hitl/pending');
+            const res = await apiFetch('/api/hitl/pending');
             const pending = await res.json();
             updateHitlBadge(pending.length);
             // If panel is visible, refresh its content too
@@ -789,3 +937,5 @@ function startHitlPolling() {
         } catch (e) { /* silent */ }
     }, 3000);
 }
+
+

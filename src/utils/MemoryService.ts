@@ -1,6 +1,7 @@
 import { ChromaClient, Collection } from "chromadb";
 import * as path from "path";
 import * as fs from "fs";
+import { vaultService } from "./VaultService";
 
 export class MemoryService {
     private client: ChromaClient;
@@ -66,6 +67,9 @@ export class MemoryService {
             metadatas: [metadata],
             documents: [text]
         });
+
+        // Keep a human-readable markdown vault per profile in addition to vector storage.
+        vaultService.appendMemoryEntry(profileId, text, metadata);
     }
 
     public async query(profileId: string, queryText: string, limit: number = 5): Promise<Array<{ text: string; metadata: any; distance: number }>> {
