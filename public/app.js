@@ -56,31 +56,30 @@ async function loadSystemControlStatus() {
 
         if (!startBtn || !connectBtn || !pill) return;
 
+        const oauthConfigured = codex.oauth_configured !== false;
+
         if (codex.connected) {
             connectBtn.textContent = 'Codex Connected';
             connectBtn.disabled = true;
-        } else if (!codex.oauth_configured) {
-            connectBtn.textContent = 'Configure OAuth Env First';
-            connectBtn.disabled = true;
         } else {
             connectBtn.textContent = 'Sign in with ChatGPT';
-            connectBtn.disabled = false;
+            connectBtn.disabled = !oauthConfigured;
         }
 
         if (system.is_running) {
             startBtn.style.display = 'none';
             pill.className = 'status-pill running';
             pill.textContent = `Running${system.started_at ? ' since ' + new Date(system.started_at).toLocaleString() : ''}`;
-        } else if (!codex.oauth_configured) {
+        } else if (!oauthConfigured) {
             startBtn.style.display = 'inline-block';
             startBtn.disabled = true;
             pill.className = 'status-pill blocked';
-            pill.textContent = 'Missing OAuth env config';
+            pill.textContent = 'Codex login unavailable in this environment';
         } else if (!codex.connected) {
             startBtn.style.display = 'inline-block';
             startBtn.disabled = true;
             pill.className = 'status-pill blocked';
-            pill.textContent = 'Connect Codex OAuth to start';
+            pill.textContent = 'Sign in with ChatGPT to start';
         } else {
             startBtn.style.display = 'inline-block';
             startBtn.disabled = false;
