@@ -278,7 +278,7 @@ export function startAdminServer(toolManager: ToolManager, port: number = 8080) 
         res.sendFile(path.join(publicDir, 'index.html'));
     });
 
-    app.listen(port, () => {
+    app.listen(port, "127.0.0.1", () => {
         console.error(`Admin Interface running on http://localhost:${port}`);
         console.error(`MCP SSE Endpoint running at http://localhost:${port}/mcp/sse`);
     });
