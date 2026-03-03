@@ -1,4 +1,4 @@
-import { spawn, ChildProcessWithoutNullStreams } from 'child_process';
+import { spawn, ChildProcess } from 'child_process';
 import * as path from 'path';
 import * as fs from 'fs';
 
@@ -18,7 +18,7 @@ export interface CodexAuthStatus {
 }
 
 interface ActiveLogin {
-    process: ChildProcessWithoutNullStreams;
+    process: ChildProcess;
     startedAt: string;
     verificationUri?: string;
     userCode?: string;

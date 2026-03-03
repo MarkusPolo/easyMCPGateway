@@ -143,7 +143,8 @@ export function startAdminServer(toolManager: ToolManager, port: number = 8080) 
                 return res.status(400).json({ error: 'Codex OAuth is not connected. Connect Codex before starting operations.' });
             }
 
-            const actor = req.authProfile?.name || req.authProfile?.id || 'unknown';
+            const authProfile = (req as any).authProfile;
+            const actor = authProfile?.name || authProfile?.id || 'unknown';
             const state = await systemControlService.start(String(actor));
             res.json({ success: true, state });
         } catch (error: any) {
