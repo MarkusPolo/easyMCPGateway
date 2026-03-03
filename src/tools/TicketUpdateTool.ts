@@ -58,7 +58,7 @@ export class TicketUpdateTool extends BaseTool {
             const updated = await ticketService.updateTicket(args.ticket_id, targetStatus as TicketStatus, {
                 reason: args.reason,
                 artifact_links: args.artifact_links
-            });
+            }, { actorId: profileId });
 
             return {
                 content: [{ type: "text", text: `Successfully updated ticket ${updated.id} to status ${updated.status}.` }]

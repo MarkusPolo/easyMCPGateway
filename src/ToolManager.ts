@@ -28,7 +28,22 @@ import {
     TicketCreateTool,
     TicketClaimTool,
     TicketListTool,
-    TicketUpdateTool
+    TicketUpdateTool,
+    ArtifactStoreTool,
+    ArtifactGetTool,
+    ArtifactListTool,
+    SchedulerTickTool,
+    ScheduleCreateTool,
+    ScheduleListTool,
+    ScheduleUpdateTool,
+    ScheduleDeleteTool,
+    HireWorkerTool,
+    LayoffWorkerTool,
+    ListWorkersTool,
+    AgentRuntimeTickTool,
+    SupervisorContextTool,
+    ReviewSubmitTool,
+    ReviewListTool
 } from "./tools";
 
 import * as fs from 'fs';
@@ -44,6 +59,8 @@ export interface Profile {
     enabledTools: Record<string, boolean>;
     requiresApproval: Record<string, boolean>;
 }
+
+const PRIVILEGED_PROFILE_NAMES = new Set(['Local Admin', 'Supervisor-CEO']);
 
 export interface PendingApproval {
     id: string;
@@ -140,6 +157,21 @@ export class ToolManager {
         this.registerTool(new TicketClaimTool());
         this.registerTool(new TicketListTool());
         this.registerTool(new TicketUpdateTool());
+        this.registerTool(new ArtifactStoreTool());
+        this.registerTool(new ArtifactGetTool());
+        this.registerTool(new ArtifactListTool());
+        this.registerTool(new SchedulerTickTool());
+        this.registerTool(new ScheduleCreateTool());
+        this.registerTool(new ScheduleListTool());
+        this.registerTool(new ScheduleUpdateTool());
+        this.registerTool(new ScheduleDeleteTool());
+        this.registerTool(new HireWorkerTool(this));
+        this.registerTool(new LayoffWorkerTool(this));
+        this.registerTool(new ListWorkersTool());
+        this.registerTool(new AgentRuntimeTickTool());
+        this.registerTool(new SupervisorContextTool());
+        this.registerTool(new ReviewSubmitTool());
+        this.registerTool(new ReviewListTool());
 
         // Ensure all registered tools have a state in all profiles
         let configChanged = false;
@@ -183,6 +215,28 @@ export class ToolManager {
 
     public getProfileByToken(token: string): Profile | undefined {
         return this.profiles.find(p => p.token === token);
+    }
+
+    public isPrivilegedProfile(profileId: string): boolean {
+        const profile = this.getProfileById(profileId);
+        if (!profile) return false;
+        return profile.id === 'default' || PRIVILEGED_PROFILE_NAMES.has(profile.name);
+    }
+
+
+    public getToolNames(): string[] {
+        return Array.from(this.tools.keys());
+    }
+
+    public createProfileWithTools(name: string, allowedTools: string[]): Profile {
+        const profile = this.createProfile(name);
+        const allow = new Set(allowedTools || []);
+        for (const toolName of this.tools.keys()) {
+            profile.enabledTools[toolName] = allow.has(toolName);
+            profile.requiresApproval[toolName] = false;
+        }
+        this.saveConfig();
+        return profile;
     }
 
     public createProfile(name: string): Profile {

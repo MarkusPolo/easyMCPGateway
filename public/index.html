@@ -58,10 +58,16 @@
                             onclick="deleteProfile()">Delete</button>
                     </div>
                 </div>
+                <div class="profile-row token-row" id="operation-controls" style="justify-content: flex-start; gap: 10px; flex-wrap: wrap;">
+                    <button id="connect-codex-btn" class="secondary-btn" onclick="connectCodexOAuth()">Connect Codex OAuth</button>
+                    <button id="start-system-btn" class="execute-btn" style="width: auto; margin-top: 0;" onclick="startSystem()">▶ Start Operations</button>
+                    <span id="system-status-pill" class="status-pill">System not started</span>
+                </div>
             </div>
 
             <nav class="tabs-nav">
                 <button class="tab-btn active" data-tab="tools">Tools</button>
+                <button class="tab-btn" data-tab="ops-game">Ops Game</button>
                 <button class="tab-btn" data-tab="connections">Connections</button>
                 <button class="tab-btn" data-tab="logs">Audit Logs</button>
                 <button class="tab-btn" data-tab="analytics">Analytics</button>
@@ -87,6 +93,21 @@
 
                 <div class="tools-grid" id="tools-grid" style="display: none;">
                     <!-- Tool cards will be generated here -->
+                </div>
+            </section>
+
+            <!-- Ops Game View -->
+            <section id="view-ops-game" class="view-section">
+                <div class="tools-grid-header" style="margin-bottom: 24px;">
+                    <div>
+                        <h2 style="font-size: 18px; font-weight: 500;">Operations Game Board</h2>
+                        <p style="color: var(--text-secondary); font-size: 14px; margin-top: 4px;">Live simulation-style overview of supervisor and workers.</p>
+                    </div>
+                    <button class="execute-btn" style="width: auto" onclick="loadOpsGameBoard()">Refresh</button>
+                </div>
+                <div id="ops-game-summary" class="ops-game-summary"></div>
+                <div id="ops-game-board" class="ops-game-board">
+                    <div class="loading">Loading game board...</div>
                 </div>
             </section>
 
