@@ -59,6 +59,9 @@ async function loadSystemControlStatus() {
         if (codex.connected) {
             connectBtn.textContent = 'Codex Connected';
             connectBtn.disabled = true;
+        } else if (!codex.oauth_configured) {
+            connectBtn.textContent = 'Configure OAuth Env First';
+            connectBtn.disabled = true;
         } else {
             connectBtn.textContent = 'Connect Codex OAuth';
             connectBtn.disabled = false;
@@ -68,6 +71,11 @@ async function loadSystemControlStatus() {
             startBtn.style.display = 'none';
             pill.className = 'status-pill running';
             pill.textContent = `Running${system.started_at ? ' since ' + new Date(system.started_at).toLocaleString() : ''}`;
+        } else if (!codex.oauth_configured) {
+            startBtn.style.display = 'inline-block';
+            startBtn.disabled = true;
+            pill.className = 'status-pill blocked';
+            pill.textContent = 'Missing OAuth env config';
         } else if (!codex.connected) {
             startBtn.style.display = 'inline-block';
             startBtn.disabled = true;

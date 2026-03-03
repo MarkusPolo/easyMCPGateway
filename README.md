@@ -107,7 +107,10 @@ The dashboard now supports connecting an LLM identity via **Codex OAuth** and ex
 
 - `CODEX_OAUTH_AUTH_URL` (default: `https://auth.openai.com/oauth/authorize`)
 - `CODEX_OAUTH_TOKEN_URL` (required for callback token exchange)
-- `CODEX_OAUTH_CLIENT_ID` (default: `codex-local-gateway`)
+- `CODEX_OAUTH_CLIENT_ID` (**required**; must be a real registered OAuth client id)
 - `CODEX_OAUTH_CLIENT_SECRET` (optional, if provider requires it)
 - `CODEX_OAUTH_SCOPE` (default: `openid profile offline_access`)
+- `CODEX_OAUTH_REDIRECT_URI` (optional but recommended; use the exact redirect URI registered in your OAuth app)
 - `SYSTEM_AUTO_START` (default: `false`, set `true` to skip dashboard start button in unattended mode)
+
+> ⚠️ The previous placeholder `codex-local-gateway` client id is not a real OAuth app and will cause `Authentication Error` on `auth.openai.com`.

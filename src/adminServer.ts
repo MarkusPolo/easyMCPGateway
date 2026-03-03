@@ -38,7 +38,7 @@ export function startAdminServer(toolManager: ToolManager, port: number = 8080) 
         try {
             const code = req.query.code as string | undefined;
             const state = req.query.state as string | undefined;
-            const redirectUri = `${req.protocol}://${req.get('host')}/oauth/codex/callback`;
+            const redirectUri = process.env.CODEX_OAUTH_REDIRECT_URI || `${req.protocol}://${req.get('host')}/oauth/codex/callback`;
 
             if (!code || !state) {
                 return res.status(400).send('Missing code/state from OAuth callback.');
@@ -115,7 +115,8 @@ export function startAdminServer(toolManager: ToolManager, port: number = 8080) 
 
     app.post('/api/llm/codex/oauth/start', requireRoles(['supervisor']), async (req, res) => {
         try {
-            const redirectUri = `${req.protocol}://${req.get('host')}/oauth/codex/callback`;
+            const configuredRedirect = process.env.CODEX_OAUTH_REDIRECT_URI;
+            const redirectUri = configuredRedirect || `${req.protocol}://${req.get('host')}/oauth/codex/callback`;
             const { authorizationUrl } = await codexOAuthService.buildAuthorizationUrl(redirectUri);
             res.json({ authorizationUrl, redirectUri });
         } catch (error: any) {
