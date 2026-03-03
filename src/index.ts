@@ -7,6 +7,7 @@ import { agentRuntimeService } from "./services/AgentRuntimeService";
 import { onboardingService } from "./services/OnboardingService";
 import { companyBootstrapService } from "./services/CompanyBootstrapService";
 import { leaderLockService } from "./services/LeaderLockService";
+import { systemControlService } from "./services/SystemControlService";
 import * as crypto from 'crypto';
 
 async function main() {
@@ -43,14 +44,23 @@ async function main() {
         console.error('[Bootstrap] failed:', error);
     }
 
+
+    // Optional auto-start for unattended deployments
+    if (process.env.SYSTEM_AUTO_START === 'true') {
+        await systemControlService.start('system:auto');
+    }
+
     const schedulerEnabled = process.env.SCHEDULER_ENABLED !== 'false';
     if (schedulerEnabled) {
         const intervalMs = Number(process.env.SCHEDULER_INTERVAL_MS || 60_000);
         setInterval(() => {
-            leaderLockService.acquire('scheduler', instanceId, Math.max(30_000, intervalMs * 2)).then((acquired) => {
-                if (!acquired) return;
-                schedulerService.runMaintenanceTick().catch((err) => {
-                    console.error('Scheduler tick failed:', err);
+            systemControlService.getState().then((state) => {
+                if (!state.is_running) return;
+                return leaderLockService.acquire('scheduler', instanceId, Math.max(30_000, intervalMs * 2)).then((acquired) => {
+                    if (!acquired) return;
+                    schedulerService.runMaintenanceTick().catch((err) => {
+                        console.error('Scheduler tick failed:', err);
+                    });
                 });
             }).catch((err) => console.error('Scheduler lock failed:', err));
         }, intervalMs);
@@ -60,10 +70,13 @@ async function main() {
     if (runtimeEnabled) {
         const runtimeIntervalMs = Number(process.env.AGENT_RUNTIME_INTERVAL_MS || 60_000);
         setInterval(() => {
-            leaderLockService.acquire('agent-runtime', instanceId, Math.max(30_000, runtimeIntervalMs * 2)).then((acquired) => {
-                if (!acquired) return;
-                agentRuntimeService.runWakeTick().catch((err) => {
-                    console.error('Agent runtime tick failed:', err);
+            systemControlService.getState().then((state) => {
+                if (!state.is_running) return;
+                return leaderLockService.acquire('agent-runtime', instanceId, Math.max(30_000, runtimeIntervalMs * 2)).then((acquired) => {
+                    if (!acquired) return;
+                    agentRuntimeService.runWakeTick().catch((err) => {
+                        console.error('Agent runtime tick failed:', err);
+                    });
                 });
             }).catch((err) => console.error('Runtime lock failed:', err));
         }, runtimeIntervalMs);

@@ -34,7 +34,86 @@ document.addEventListener('DOMContentLoaded', async () => {
     fetchTools();
     setupTabs();
     startHitlPolling();
+    loadSystemControlStatus();
 });
+
+
+
+async function loadSystemControlStatus() {
+    try {
+        const [systemRes, codexRes] = await Promise.all([
+            apiFetch('/api/system/status'),
+            apiFetch('/api/llm/codex/status')
+        ]);
+
+        if (!systemRes.ok || !codexRes.ok) return;
+        const system = await systemRes.json();
+        const codex = await codexRes.json();
+
+        const startBtn = document.getElementById('start-system-btn');
+        const connectBtn = document.getElementById('connect-codex-btn');
+        const pill = document.getElementById('system-status-pill');
+
+        if (!startBtn || !connectBtn || !pill) return;
+
+        if (codex.connected) {
+            connectBtn.textContent = 'Codex Connected';
+            connectBtn.disabled = true;
+        } else {
+            connectBtn.textContent = 'Connect Codex OAuth';
+            connectBtn.disabled = false;
+        }
+
+        if (system.is_running) {
+            startBtn.style.display = 'none';
+            pill.className = 'status-pill running';
+            pill.textContent = `Running${system.started_at ? ' since ' + new Date(system.started_at).toLocaleString() : ''}`;
+        } else if (!codex.connected) {
+            startBtn.style.display = 'inline-block';
+            startBtn.disabled = true;
+            pill.className = 'status-pill blocked';
+            pill.textContent = 'Connect Codex OAuth to start';
+        } else {
+            startBtn.style.display = 'inline-block';
+            startBtn.disabled = false;
+            pill.className = 'status-pill';
+            pill.textContent = 'Ready to start operations';
+        }
+    } catch (error) {
+        console.error('Failed to load system control status', error);
+    }
+}
+
+async function connectCodexOAuth() {
+    try {
+        const res = await apiFetch('/api/llm/codex/oauth/start', { method: 'POST' });
+        const data = await res.json();
+        if (!res.ok) {
+            alert(data.error || 'Failed to start OAuth flow');
+            return;
+        }
+        window.open(data.authorizationUrl, '_blank', 'noopener');
+        alert('Complete OAuth in the opened browser tab, then click OK to refresh status.');
+        await loadSystemControlStatus();
+    } catch (error) {
+        alert('OAuth start failed: ' + error.message);
+    }
+}
+
+async function startSystem() {
+    if (!confirm('Start autonomous operations now?')) return;
+    try {
+        const res = await apiFetch('/api/system/start', { method: 'POST' });
+        const data = await res.json();
+        if (!res.ok) {
+            alert(data.error || 'Failed to start system');
+            return;
+        }
+        await loadSystemControlStatus();
+    } catch (error) {
+        alert('Failed to start system: ' + error.message);
+    }
+}
 
 async function fetchProfiles() {
     try {

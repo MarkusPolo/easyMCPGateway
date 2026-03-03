@@ -12,6 +12,8 @@ import { opsService } from './services/OpsService';
 import { workerRunService } from './services/WorkerRunService';
 import { reviewService } from './services/ReviewService';
 import { ticketService } from './services/TicketService';
+import { codexOAuthService } from './services/CodexOAuthService';
+import { systemControlService } from './services/SystemControlService';
 
 export function startAdminServer(toolManager: ToolManager, port: number = 8080) {
     const app = express();
@@ -31,6 +33,23 @@ export function startAdminServer(toolManager: ToolManager, port: number = 8080) 
     // Serve static files from the 'public' directory
     const publicDir = path.join(process.cwd(), 'public');
     app.use(express.static(publicDir));
+
+    app.get('/oauth/codex/callback', async (req, res) => {
+        try {
+            const code = req.query.code as string | undefined;
+            const state = req.query.state as string | undefined;
+            const redirectUri = `${req.protocol}://${req.get('host')}/oauth/codex/callback`;
+
+            if (!code || !state) {
+                return res.status(400).send('Missing code/state from OAuth callback.');
+            }
+
+            await codexOAuthService.handleCallback({ code, state, redirectUri });
+            res.send('<html><body style="font-family:sans-serif;background:#0d1117;color:#c9d1d9;padding:24px;"><h2>Codex OAuth connected ✅</h2><p>You can close this window and return to the dashboard.</p></body></html>');
+        } catch (error: any) {
+            res.status(500).send(`OAuth callback failed: ${error?.message || 'unknown error'}`);
+        }
+    });
 
     // API authentication + minimal authorization hardening
     app.use('/api', (req, res, next) => {
@@ -83,6 +102,74 @@ export function startAdminServer(toolManager: ToolManager, port: number = 8080) 
         if (!name) return res.status(400).json({ error: "Name is required" });
         const newProfile = toolManager.createProfile(name);
         res.json(newProfile);
+    });
+
+    app.get('/api/llm/codex/status', async (req, res) => {
+        try {
+            const status = await codexOAuthService.getStatus();
+            res.json(status);
+        } catch (error: any) {
+            res.status(500).json({ error: error.message || 'Failed to read Codex auth status' });
+        }
+    });
+
+    app.post('/api/llm/codex/oauth/start', requireRoles(['supervisor']), async (req, res) => {
+        try {
+            const redirectUri = `${req.protocol}://${req.get('host')}/oauth/codex/callback`;
+            const { authorizationUrl } = await codexOAuthService.buildAuthorizationUrl(redirectUri);
+            res.json({ authorizationUrl, redirectUri });
+        } catch (error: any) {
+            res.status(500).json({ error: error.message || 'Failed to start OAuth flow' });
+        }
+    });
+
+    app.post('/api/llm/codex/oauth/manual', requireRoles(['supervisor']), async (req, res) => {
+        try {
+            const { access_token, refresh_token, expires_in } = req.body || {};
+            if (!access_token) return res.status(400).json({ error: 'access_token is required' });
+
+            await codexOAuthService.storeTokens({
+                accessToken: String(access_token),
+                refreshToken: refresh_token ? String(refresh_token) : undefined,
+                expiresIn: expires_in ? Number(expires_in) : undefined
+            });
+
+            res.json({ success: true });
+        } catch (error: any) {
+            res.status(500).json({ error: error.message || 'Failed to store OAuth token' });
+        }
+    });
+
+    app.get('/api/system/status', async (req, res) => {
+        try {
+            const [system, codex] = await Promise.all([
+                systemControlService.getState(),
+                codexOAuthService.getStatus()
+            ]);
+            res.json({
+                is_running: system.is_running,
+                started_at: system.started_at || null,
+                started_by: system.started_by || null,
+                codex_connected: codex.connected
+            });
+        } catch (error: any) {
+            res.status(500).json({ error: error.message || 'Failed to read system status' });
+        }
+    });
+
+    app.post('/api/system/start', requireRoles(['supervisor']), async (req, res) => {
+        try {
+            const codex = await codexOAuthService.getStatus();
+            if (!codex.connected) {
+                return res.status(400).json({ error: 'Codex OAuth is not connected. Connect Codex before starting operations.' });
+            }
+
+            const actor = req.authProfile?.name || req.authProfile?.id || 'unknown';
+            const state = await systemControlService.start(String(actor));
+            res.json({ success: true, state });
+        } catch (error: any) {
+            res.status(500).json({ error: error.message || 'Failed to start system' });
+        }
     });
 
     // --- Worker Management API ---

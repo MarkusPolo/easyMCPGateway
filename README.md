@@ -93,3 +93,21 @@ Use this only when worker lifecycle actions are needed.
 - `SCHEDULER_INTERVAL_MS` (default: `60000`)
 - `AGENT_RUNTIME_ENABLED` (default: `true`)
 - `AGENT_RUNTIME_INTERVAL_MS` (default: `60000`)
+
+
+## Codex OAuth + Manual Operations Start
+
+The dashboard now supports connecting an LLM identity via **Codex OAuth** and explicitly starting operations:
+
+- `Connect Codex OAuth` starts an OAuth authorization flow.
+- `Start Operations` appears only while the system is not running; once started, it is hidden.
+- Scheduler/runtime loops only execute when the system is started.
+
+### OAuth environment variables
+
+- `CODEX_OAUTH_AUTH_URL` (default: `https://auth.openai.com/oauth/authorize`)
+- `CODEX_OAUTH_TOKEN_URL` (required for callback token exchange)
+- `CODEX_OAUTH_CLIENT_ID` (default: `codex-local-gateway`)
+- `CODEX_OAUTH_CLIENT_SECRET` (optional, if provider requires it)
+- `CODEX_OAUTH_SCOPE` (default: `openid profile offline_access`)
+- `SYSTEM_AUTO_START` (default: `false`, set `true` to skip dashboard start button in unattended mode)

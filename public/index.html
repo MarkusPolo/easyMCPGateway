@@ -58,6 +58,11 @@
                             onclick="deleteProfile()">Delete</button>
                     </div>
                 </div>
+                <div class="profile-row token-row" id="operation-controls" style="justify-content: flex-start; gap: 10px; flex-wrap: wrap;">
+                    <button id="connect-codex-btn" class="secondary-btn" onclick="connectCodexOAuth()">Connect Codex OAuth</button>
+                    <button id="start-system-btn" class="execute-btn" style="width: auto; margin-top: 0;" onclick="startSystem()">▶ Start Operations</button>
+                    <span id="system-status-pill" class="status-pill">System not started</span>
+                </div>
             </div>
 
             <nav class="tabs-nav">
